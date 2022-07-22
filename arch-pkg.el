@@ -1,12 +1,35 @@
+;;; arch-pkg --- Browse Archlinux packages in Emacs  -*- lexical-binding: t -*-
+
+;; Author: Hikmet Altıntaş (hikmet1517@gmail.com)
+;; Keywords: convenience
+;; URL: "https://github.com/hikmet517/arch-pkg"
+;; Version: 0.1
+
+;;; Commentary:
+;; Browse Archlinux packages in Emacs, using an interface similar to package.el
+
+;; TODO
+;; print installed files
+;; find optional status
+
+
+;;; Code:
+
+;;;; Libraries
+
 (require 'tabulated-list)
 (require 'help-mode)
 (require 'button)
+(require 'subr-x)
+
+
+;;;; Variables
 
 (defconst arch-pkg-sync-db-path "/var/lib/pacman/sync/")
 (defconst arch-pkg-local-db-path "/var/lib/pacman/local/")
 
-(defvar arch-pkg-db nil "database (local and sync merged)")
-(defvar arch-pkg-list '() "package list for `tabulated-list-entries'")
+(defvar arch-pkg-db nil "Database (local and sync merged).")
+(defvar arch-pkg-list '() "Package list for `tabulated-list-entries'.")
 
 (defvar arch-pkg-list-mode-map
   (let ((map (make-sparse-keymap)))
@@ -19,8 +42,9 @@
   'help-echo (purecopy "mouse-2, RET: Describe package"))
 
 
-;; helpers
+;;;; Helper functions
 (defun arch-pkg-reset-internal-data ()
+  "Reset internal data, for debugging."
   (interactive)
   (setq arch-pkg-list nil
         arch-pkg-db nil))
@@ -47,7 +71,99 @@
 
 
 
-;; functions
+;;;; Functions
+
+(defun arch-pkg--parse-desc (beg end)
+  (let ((key "")
+        (val "")
+        (pkg (make-hash-table :test #'equal))
+        (try-to-add (lambda (k v h)
+                      (let ((kk (string-trim k))
+                            (vv (string-trim v)))
+                        (when (and (not (string-empty-p kk))
+                                   (not (string-empty-p vv)))
+                          (puthash kk vv h))))))
+    (save-excursion
+      (goto-char beg)
+      (while (< (point) end)
+        (skip-chars-forward "\n\t ")
+        (let ((line (decode-coding-string (buffer-substring-no-properties (point) (line-end-position))
+                                          'utf-8)))
+          (unless (string-empty-p line)
+            ;; TODO check ending %
+            (if (= (aref line 0) ?%)  ; key found
+                (progn
+                  (funcall try-to-add key val pkg)
+                  (setq key (substring line 1 (- (length line) 1)))
+                  (setq val ""))
+              (progn                  ; value found
+                (setq val (concat val line "\n")))))
+          (forward-line)
+          (skip-chars-forward "\n\t ")))
+      (funcall try-to-add key val pkg)
+      pkg)))
+
+
+(defun arch-pkg--read-desc-file (file)
+  (with-temp-buffer
+    (insert-file-contents file)
+    (arch-pkg--parse-desc (point-min) (point-max))))
+
+
+(defun arch-pkg--read-gz (file)
+  (with-temp-buffer
+    (set-buffer-multibyte nil)
+    (insert-file-contents-literally file)
+    (zlib-decompress-region (point-min) (point-max))
+    (goto-char (point-min))
+
+    (let ((i (point-min))
+          (pkgs (make-hash-table :test #'equal))
+          (buf-size (buffer-size)))
+
+      (while (< i buf-size)
+        (let ((size (string-to-number (buffer-substring-no-properties (+ i 124) (+ i 124 11)) 8))
+              (typeflag (buffer-substring-no-properties (+ i 156) (+ i 157)))
+              ;; (name (replace-regexp-in-string "[[:cntrl:]]+" "" (buffer-substring-no-properties i (+ i 100))))
+              )
+
+          (when (and (/= size 0)
+                     (not (string= typeflag "x")))
+
+            (let ((desc (arch-pkg--parse-desc (+ i 512) (+ i 512 size))))
+              (puthash (gethash "NAME" desc) desc pkgs)))
+
+          (setq i (+ (* (ceiling (/ (+ (1- i) 512 size) 512.0)) 512) 1))))
+      pkgs)))
+
+
+(defun arch-pkg--read-sync-db ()
+  (let ((repo-all (make-hash-table :test #'equal)))
+    (dolist (repo-file (directory-files arch-pkg-sync-db-path))
+      (unless (or (string= repo-file ".")
+                  (string= repo-file ".."))
+        (message "reading: %s" (expand-file-name repo-file arch-pkg-sync-db-path))
+        (let ((repo (arch-pkg--read-gz (expand-file-name repo-file arch-pkg-sync-db-path))))
+          (maphash (lambda (name pkg)
+                     (puthash "REPOSITORY" (file-name-base repo-file) pkg)
+                     (puthash name pkg repo-all))
+                   repo))))
+    repo-all))
+
+
+(defun arch-pkg--read-local-db ()
+  (let ((db (make-hash-table :test #'equal)))
+    (dolist (dir (directory-files arch-pkg-local-db-path))
+      (unless (or (string= dir ".")
+                  (string= dir ".."))
+        (let ((pkg-dir (expand-file-name dir arch-pkg-local-db-path)))
+          (when (file-directory-p pkg-dir)
+            (let ((desc (arch-pkg--read-desc-file (expand-file-name
+                                                   "desc"
+                                                   pkg-dir))))
+              (puthash (gethash "NAME" desc) desc db))))))
+    db))
+
 
 (defun arch-pkg--create-db ()
   (let ((arch-pkg-sync-db (arch-pkg--read-sync-db))
@@ -92,96 +208,8 @@
                         pkg))
              arch-pkg-db)))
 
-(defun arch-pkg--parse-desc (beg end)
-  (let ((key "")
-        (val "")
-        (pkg (make-hash-table :test #'equal))
-        (try-to-add (lambda (k v h)
-                      (let ((kk (string-trim k))
-                            (vv (string-trim v)))
-                        (when (and (not (string-empty-p kk))
-                                   (not (string-empty-p vv)))
-                          (puthash kk vv h))))))
-    (save-excursion
-      (goto-char beg)
-      (while (< (point) end)
-        (skip-chars-forward "\n\t ")
-        (let ((line (string-as-multibyte (buffer-substring-no-properties (point) (line-end-position)))))
-          (unless (string-empty-p line)
-            ;; TODO check ending %
-            (if (= (aref line 0) ?%)  ; key found
-                (progn
-                  (funcall try-to-add key val pkg)
-                  (setq key (substring line 1 (- (length line) 1)))
-                  (setq val ""))
-              (progn                  ; value found
-                (setq val (concat val line "\n")))))
-          (forward-line)
-          (skip-chars-forward "\n\t ")))
-      (funcall try-to-add key val pkg)
-      pkg)))
 
-
-(defun arch-pkg--read-desc-file (file)
-  (with-temp-buffer
-    (insert-file-contents file)
-    (arch-pkg--parse-desc (point-min) (point-max))))
-
-
-(defun arch-pkg--read-gz (file)
-  (with-temp-buffer
-    (set-buffer-multibyte nil)
-    (insert-file-contents-literally file)
-    (zlib-decompress-region (point-min) (point-max))
-    (goto-char (point-min))
-
-    (let ((i (point-min))
-          (pkgs (make-hash-table :test #'equal))
-          (buf-size (buffer-size)))
-
-      (while (< i buf-size)
-        (let ((name (replace-regexp-in-string "[[:cntrl:]]+" "" (buffer-substring-no-properties i (+ i 100))))
-              (size (string-to-number (buffer-substring-no-properties (+ i 124) (+ i 124 11)) 8))
-              (typeflag (buffer-substring-no-properties (+ i 156) (+ i 157))))
-
-          (when (and (/= size 0)
-                     (not (string= typeflag "x")))
-
-            (let ((desc (arch-pkg--parse-desc (+ i 512) (+ i 512 size))))
-              (puthash (gethash "NAME" desc) desc pkgs)))
-
-          (setq i (+ (* (ceiling (/ (+ (1- i) 512 size) 512.0)) 512) 1))))
-      pkgs)))
-
-
-(defun arch-pkg--read-sync-db ()
-  (let ((repo-all (make-hash-table :test #'equal)))
-    (dolist (repo-file (directory-files arch-pkg-sync-db-path))
-      (unless (or (string= repo-file ".")
-                  (string= repo-file ".."))
-        (message "reading: %s" (expand-file-name repo-file arch-pkg-sync-db-path))
-        (let ((repo (arch-pkg--read-gz (expand-file-name repo-file arch-pkg-sync-db-path))))
-          (maphash (lambda (name pkg)
-                     (puthash "REPOSITORY" (file-name-base repo-file) pkg)
-                     (puthash name pkg repo-all))
-                   repo))))
-    repo-all))
-
-
-(defun arch-pkg--read-local-db ()
-  (let ((db (make-hash-table :test #'equal)))
-    (dolist (dir (directory-files arch-pkg-local-db-path))
-      (unless (or (string= dir ".")
-                  (string= dir ".."))
-        (let ((pkg-dir (expand-file-name dir arch-pkg-local-db-path)))
-          (when (file-directory-p pkg-dir)
-            (let ((desc (arch-pkg--read-desc-file (expand-file-name
-                                                   "desc"
-                                                   pkg-dir))))
-              (puthash (gethash "NAME" desc) desc db))))))
-    db))
-
-
+;;;###autoload
 (define-derived-mode arch-pkg-list-mode tabulated-list-mode "Arch Package List"
   "Major mode for list of Arch packages
 
@@ -198,7 +226,7 @@
           ("Size" 0 t)]))
 
 
-;; TODO: reduce unnecessary required packages
+;;;###autoload
 (defun arch-pkg-list-packages ()
   (interactive)
 
@@ -244,6 +272,7 @@
     (tabulated-list-print)))
 
 
+;;;###autoload
 (defun arch-pkg-describe-package (name)
   (interactive
    (list
@@ -256,7 +285,7 @@
   (when (null name)
     (if (eq major-mode 'arch-pkg-list-mode)
         (tabulated-list-get-id)
-      (error "package name needed")))
+      (error "Package name needed")))
 
   (setq name (car (split-string name ":")))
 
@@ -278,8 +307,7 @@
                    ("INSTALLDATE" . "Install Date")
                    ("CSIZE" . "Download Size")
                    ("ISIZE" . "Installed Size"))))
-    (let ((buf (get-buffer-create (format "*arch-pkg <%s>*" name)))
-          (width (apply #'max (mapcar (lambda (s) (length (cdr s))) key-col))))
+    (let ((width (apply #'max (mapcar (lambda (s) (length (cdr s))) key-col))))
 
       (help-setup-xref (list #'arch-pkg-describe-package name)
                        (called-interactively-p 'interactive))
@@ -325,3 +353,6 @@
 ;;            (prin1 v (current-buffer))
 ;;            (insert "\n"))
 ;;          (gethash "guile" arch-pkg-db))
+
+(provide 'arch-pkg)
+;;; arch-pkg.el ends here
