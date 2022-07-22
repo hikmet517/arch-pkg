@@ -1,4 +1,4 @@
-;;; arch-pkg --- Browse Archlinux packages in Emacs  -*- lexical-binding: t -*-
+;;; arch-pkg.el --- Browse Archlinux packages in Emacs  -*- lexical-binding: t -*-
 
 ;; Author: Hikmet Altıntaş (hikmet1517@gmail.com)
 ;; Keywords: convenience
@@ -8,7 +8,7 @@
 ;;; Commentary:
 ;; Browse Archlinux packages in Emacs, using an interface similar to package.el
 
-;; TODO
+;;; TODO
 ;; print installed files
 ;; find optional status
 
