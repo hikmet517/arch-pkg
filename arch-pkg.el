@@ -8,9 +8,9 @@
 ;;; Commentary:
 ;; Browse Archlinux packages in Emacs, using an interface similar to package.el
 
-;;; TODO
+;;; TODO:
 ;; print installed files
-;; find optional status
+;; find optional dependency status
 
 
 ;;; Code:
@@ -44,21 +44,24 @@
 
 ;;;; Helper functions
 (defun arch-pkg-reset-internal-data ()
-  "Reset internal data, for debugging."
+  "Reset internal data, for debugging only."
   (interactive)
   (setq arch-pkg-list nil
         arch-pkg-db nil))
 
 
 (defun arch-pkg--format-date (n)
+  "Format unix date N (integer) as ISO date string."
   (format-time-string "%Y-%m-%d %H:%M" n))
 
 
 (defun arch-pkg--format-status (n)
+  "Format package status N (an integer)."
   (aref ["installed" "dependency" ""] n))
 
 
 (defun arch-pkg--format-size (n)
+  "Format size given in bytes N (an integer)."
   (cond
    ((< n 1024)
     (format "%d B" n))
@@ -74,6 +77,7 @@
 ;;;; Functions
 
 (defun arch-pkg--parse-desc (beg end)
+  "Parse descr buffer given between BEG and END."
   (let ((key "")
         (val "")
         (pkg (make-hash-table :test #'equal))
@@ -105,12 +109,16 @@
 
 
 (defun arch-pkg--read-desc-file (file)
+  "Read and parse descr file FILE."
   (with-temp-buffer
     (insert-file-contents file)
     (arch-pkg--parse-desc (point-min) (point-max))))
 
 
 (defun arch-pkg--read-gz (file)
+  "Read gzipped package file FILE.
+Read gzipped package file, uncompress it, parse descr files
+into a hashmap and return it."
   (with-temp-buffer
     (set-buffer-multibyte nil)
     (insert-file-contents-literally file)
@@ -138,6 +146,7 @@
 
 
 (defun arch-pkg--read-sync-db ()
+  "Read sync package database under `arch-pkg-sync-db-path' (all repos)."
   (let ((repo-all (make-hash-table :test #'equal)))
     (dolist (repo-file (directory-files arch-pkg-sync-db-path))
       (unless (or (string= repo-file ".")
@@ -152,6 +161,7 @@
 
 
 (defun arch-pkg--read-local-db ()
+  "Read local packages, all files under `arch-pkg-local-db-path'."
   (let ((db (make-hash-table :test #'equal)))
     (dolist (dir (directory-files arch-pkg-local-db-path))
       (unless (or (string= dir ".")
@@ -166,6 +176,7 @@
 
 
 (defun arch-pkg--create-db ()
+  "Read local and sync databases and merge them into `arch-pkg-db'."
   (let ((arch-pkg-sync-db (arch-pkg--read-sync-db))
         (arch-pkg-local-db (arch-pkg--read-local-db)))
     (setq arch-pkg-db (make-hash-table :test #'equal))
@@ -211,7 +222,7 @@
 
 ;;;###autoload
 (define-derived-mode arch-pkg-list-mode tabulated-list-mode "Arch Package List"
-  "Major mode for list of Arch packages
+  "Major mode for browsing a list of Archlinux packages.
 
 \\{arch-pkg-list-mode-map}"
   (visual-line-mode +1)
@@ -228,6 +239,7 @@
 
 ;;;###autoload
 (defun arch-pkg-list-packages ()
+  "Display a list of packages."
   (interactive)
 
   ;; read merge sync and local data and merge them into db
@@ -273,7 +285,8 @@
 
 
 ;;;###autoload
-(defun arch-pkg-describe-package (name)
+(defun arch-pkg-describe-package (package)
+  "Display the full documentation of Archlinux package PACKAGE (a string)."
   (interactive
    (list
     (progn
@@ -283,14 +296,14 @@
         (completing-read "Describe Arch Package: "
                          (hash-table-keys arch-pkg-db))))))
 
-  (when (null name)
+  (when (null package)
     (if (eq major-mode 'arch-pkg-list-mode)
-        (setq name (tabulated-list-get-id))
+        (setq package (tabulated-list-get-id))
       (error "Package name needed")))
 
-  (setq name (car (split-string name ":")))
+  (setq package (car (split-string package ":")))
 
-  (let ((pkg (gethash name arch-pkg-db))
+  (let ((pkg (gethash package arch-pkg-db))
         (key-col '(("NAME" . "Name")
                    ("VERSION" . "Version")
                    ("DESC" . "Description")
@@ -310,7 +323,7 @@
                    ("ISIZE" . "Installed Size"))))
     (let ((width (apply #'max (mapcar (lambda (s) (length (cdr s))) key-col))))
 
-      (help-setup-xref (list #'arch-pkg-describe-package name)
+      (help-setup-xref (list #'arch-pkg-describe-package package)
                        (called-interactively-p 'interactive))
 
       (with-help-window (help-buffer)
