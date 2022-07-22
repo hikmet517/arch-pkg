@@ -6,7 +6,7 @@
 (defconst arch-pkg-local-db-path "/var/lib/pacman/local/")
 
 (defvar arch-pkg-db nil "database (local and sync merged)")
-(defvar arch-pkg-list '() "database (local and sync merged)")
+(defvar arch-pkg-list '() "package list for `tabulated-list-entries'")
 
 (defvar arch-pkg-list-mode-map
   (let ((map (make-sparse-keymap)))
@@ -17,9 +17,7 @@
 ;; helpers
 (defun arch-pkg-reset-internal-data ()
   (interactive)
-  (setq arch-pkg-sync-db nil
-        arch-pkg-local-db nil
-        arch-pkg-list nil
+  (setq arch-pkg-list nil
         arch-pkg-db nil))
 
 
@@ -42,6 +40,50 @@
    ((< (/ n 1024.0 1024.0 1024.0) 1024.0)
     (format "%.1f GiB" (/ n 1024.0 1024.0 1024.0)))))
 
+
+;; functions
+
+(defun arch-pkg--create-db ()
+  (let ((arch-pkg-sync-db (arch-pkg--read-sync-db))
+        (arch-pkg-local-db (arch-pkg--read-local-db)))
+    (setq arch-pkg-db (make-hash-table :test #'equal))
+    ;; add everything in sync-db to db
+    (maphash (lambda (k v) (puthash k v arch-pkg-db)) arch-pkg-sync-db)
+
+    ;; traverse local-db, if found in db, merge it,
+    ;; if not (meaning that it is a foreign package) add it
+    (maphash (lambda (local-db-name local-db-pkg)
+               (let ((db-pkg (gethash local-db-name arch-pkg-db)))
+                 (if db-pkg
+                     ;; found, merge it
+                     (maphash (lambda (k v) (puthash k v db-pkg)) local-db-pkg)
+                   ;; not found, foreign package, add it
+                   (puthash local-db-name local-db-pkg arch-pkg-db))))
+             arch-pkg-local-db)
+
+    ;; parse some fieds
+    (maphash (lambda (name pkg)
+               (maphash (lambda (k v)
+                          (cond
+                           ((string= k "DEPENDS")
+                            (let ((deps (split-string v "\n")))
+                              ;; add dep to required by field
+                              (puthash k deps pkg)
+                              (dolist (d deps)
+                                (let ((dep-pkg (gethash d arch-pkg-db)))
+                                  (when dep-pkg
+                                    (push name (gethash "REQUIREDBY" dep-pkg)))))))
+                           ((string= k "OPTDEPENDS")
+                            (puthash k (split-string v "\n") pkg))
+                           ((or (string= k "BUILDDATE")
+                                (string= k "INSTALLDATE")
+                                (string= k "SIZE")
+                                (string= k "ISIZE")
+                                (string= k "CSIZE")
+                                (string= k "REASON"))
+                            (puthash k (string-to-number v) pkg))))
+                        pkg))
+             arch-pkg-db)))
 
 (defun arch-pkg--parse-desc (beg end)
   (let ((key "")
@@ -149,52 +191,13 @@
           ("Size" 0 t)]))
 
 
-;; TODO: add required packages
+;; TODO: reduce unnecessary required packages
 (defun arch-pkg-list-packages ()
   (interactive)
 
   ;; read merge sync and local data and merge them into db
   (unless arch-pkg-db
-    (let ((arch-pkg-sync-db (arch-pkg--read-sync-db))
-          (arch-pkg-local-db (arch-pkg--read-local-db)))
-      (setq arch-pkg-db (make-hash-table :test #'equal))
-      ;; add everything in sync-db to db
-      (maphash (lambda (k v) (puthash k v arch-pkg-db)) arch-pkg-sync-db)
-
-      ;; traverse local-db, if found in db, merge it,
-      ;; if not (meaning that it is a foreign package) add it
-      (maphash (lambda (local-db-name local-db-pkg)
-                 (let ((db-pkg (gethash local-db-name arch-pkg-db)))
-                   (if db-pkg
-                       ;; found, merge it
-                       (maphash (lambda (k v) (puthash k v db-pkg)) local-db-pkg)
-                     ;; not found, foreign package, add it
-                     (puthash local-db-name local-db-pkg arch-pkg-db))))
-               arch-pkg-local-db)
-
-      ;; parse some fieds
-      (maphash (lambda (name pkg)
-                 (maphash (lambda (k v)
-                            (cond
-                             ((string= k "DEPENDS")
-                              (let ((deps (split-string v "\n")))
-                                ;; add dep to required by field
-                                (puthash k deps pkg)
-                                (dolist (d deps)
-                                  (let ((dep-pkg (gethash d arch-pkg-db)))
-                                    (when dep-pkg
-                                      (push name (gethash "REQUIREDBY" dep-pkg)))))))
-                             ((string= k "OPTDEPENDS")
-                              (puthash k (split-string v "\n") pkg))
-                             ((or (string= k "BUILDDATE")
-                                  (string= k "INSTALLDATE")
-                                  (string= k "SIZE")
-                                  (string= k "ISIZE")
-                                  (string= k "CSIZE")
-                                  (string= k "REASON"))
-                              (puthash k (string-to-number v) pkg))))
-                          pkg))
-               arch-pkg-db)))
+    (arch-pkg--create-db))
 
   ;; create list for tabulated-list-entries
   (unless arch-pkg-list
@@ -234,29 +237,36 @@
     (tabulated-list-print)))
 
 
-;; FIX: when called from other buffer except "arch packages", it crashes
-(defun arch-pkg-describe-package (&optional name)
-  (interactive)
-  (unless name
-    (setq name (tabulated-list-get-id)))
-  (let* ((pkg (gethash name arch-pkg-db))
-         (key-col '(("NAME" . "Name")
-                    ("VERSION" . "Version")
-                    ("DESC" . "Description")
-                    ("URL" . "Url")
-                    ("LICENSE" . "Licenses")
-                    ("REASON" . "Status")
-                    ("REPOSITORY" . "Repository")
-                    ("GROUPS" . "Groups")
-                    ("DEPENDS" . "Dependencies")
-                    ("OPTDEPENDS" . "Optional")
-                    ("REQUIREDBY" . "Required By")
-                    ("ARCH" . "Architecture")
-                    ("PACKAGER" . "Maintainer")
-                    ("BUILDDATE" . "Build Date")
-                    ("INSTALLDATE" . "Install Date")
-                    ("CSIZE" . "Download Size")
-                    ("ISIZE" . "Installed Size"))))
+(defun arch-pkg-describe-package (name)
+  (interactive
+   (list
+    (progn
+      (unless arch-pkg-db
+        (arch-pkg--create-db))
+      (completing-read "Describe Arch Package: "
+                       (hash-table-keys arch-pkg-db)))))
+  (when (null name)
+    (if (eq major-mode 'arch-pkg-list-mode)
+        (tabulated-list-get-id)
+      (error "package name needed")))
+  (let ((pkg (gethash name arch-pkg-db))
+        (key-col '(("NAME" . "Name")
+                   ("VERSION" . "Version")
+                   ("DESC" . "Description")
+                   ("URL" . "Url")
+                   ("LICENSE" . "Licenses")
+                   ("REASON" . "Status")
+                   ("REPOSITORY" . "Repository")
+                   ("GROUPS" . "Groups")
+                   ("DEPENDS" . "Dependencies")
+                   ("OPTDEPENDS" . "Optional")
+                   ("REQUIREDBY" . "Required By")
+                   ("ARCH" . "Architecture")
+                   ("PACKAGER" . "Maintainer")
+                   ("BUILDDATE" . "Build Date")
+                   ("INSTALLDATE" . "Install Date")
+                   ("CSIZE" . "Download Size")
+                   ("ISIZE" . "Installed Size"))))
     (let ((buf (get-buffer-create (format "*arch-pkg <%s>*" name)))
           (width (apply #'max (mapcar (lambda (s) (length (cdr s))) key-col))))
       (with-current-buffer buf
@@ -269,7 +279,7 @@
             (let ((val (gethash (car kc) pkg))
                   (key (cdr kc)))
               (when val
-                (insert (propertize (string-pad (concat key ": ") (+ width 2) 32 t)
+                (insert (propertize (string-pad (concat key ": ") (+ width 3) 32 t)
                                     'font-lock-face '(bold font-lock-function-name-face)))
                 (cond
                  ((string= key "Url")
