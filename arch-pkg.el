@@ -279,12 +279,13 @@
     (progn
       (unless arch-pkg-db
         (arch-pkg--create-db))
-      (completing-read "Describe Arch Package: "
-                       (hash-table-keys arch-pkg-db)))))
-  (message "%s" (stringp name))
+      (unless (eq major-mode 'arch-pkg-list-mode)
+        (completing-read "Describe Arch Package: "
+                         (hash-table-keys arch-pkg-db))))))
+
   (when (null name)
     (if (eq major-mode 'arch-pkg-list-mode)
-        (tabulated-list-get-id)
+        (setq name (tabulated-list-get-id))
       (error "Package name needed")))
 
   (setq name (car (split-string name ":")))
