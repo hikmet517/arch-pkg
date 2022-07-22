@@ -13,7 +13,12 @@
     (define-key map [(control ?m)] #'arch-pkg-describe-package)
     map))
 
+(define-button-type 'help-arch-package
+  :supertype 'help-xref
+  'help-function 'arch-pkg-describe-package
+  'help-echo (purecopy "mouse-2, RET: Describe package"))
 
+
 ;; helpers
 (defun arch-pkg-reset-internal-data ()
   (interactive)
@@ -41,6 +46,7 @@
     (format "%.1f GiB" (/ n 1024.0 1024.0 1024.0)))))
 
 
+
 ;; functions
 
 (defun arch-pkg--create-db ()
@@ -73,7 +79,8 @@
                                 (let ((dep-pkg (gethash d arch-pkg-db)))
                                   (when dep-pkg
                                     (push name (gethash "REQUIREDBY" dep-pkg)))))))
-                           ((string= k "OPTDEPENDS")
+                           ((or (string= k "OPTDEPENDS")
+                                (string= k "LICENSE"))
                             (puthash k (split-string v "\n") pkg))
                            ((or (string= k "BUILDDATE")
                                 (string= k "INSTALLDATE")
@@ -245,10 +252,14 @@
         (arch-pkg--create-db))
       (completing-read "Describe Arch Package: "
                        (hash-table-keys arch-pkg-db)))))
+  (message "%s" (stringp name))
   (when (null name)
     (if (eq major-mode 'arch-pkg-list-mode)
         (tabulated-list-get-id)
       (error "package name needed")))
+
+  (setq name (car (split-string name ":")))
+
   (let ((pkg (gethash name arch-pkg-db))
         (key-col '(("NAME" . "Name")
                    ("VERSION" . "Version")
@@ -269,44 +280,44 @@
                    ("ISIZE" . "Installed Size"))))
     (let ((buf (get-buffer-create (format "*arch-pkg <%s>*" name)))
           (width (apply #'max (mapcar (lambda (s) (length (cdr s))) key-col))))
-      (with-current-buffer buf
-        (let ((inhibit-read-only t))
-          (erase-buffer)
-          (setq buffer-file-coding-system 'utf-8)
 
-          ;; insert
-          (dolist (kc key-col)
-            (let ((val (gethash (car kc) pkg))
-                  (key (cdr kc)))
-              (when val
-                (insert (propertize (string-pad (concat key ": ") (+ width 3) 32 t)
-                                    'font-lock-face '(bold font-lock-function-name-face)))
-                (cond
-                 ((string= key "Url")
-                  (insert-text-button val 'action (lambda (but)
-                                                    (browse-url (button-label but))))
-                  (insert "\n"))
-                 ((or (string= key "Build Date")
-                      (string= key "Install Date"))
-                  (insert (arch-pkg--format-date val) "\n"))
-                 ((or (string= key "Installed Size")
-                      (string= key "Download Size"))
-                  (insert (arch-pkg--format-size val) "\n"))
-                 ((or (string= key "Dependencies")
-                      (string= key "Required By")
-                      (string= key "Optional"))
-                  (dolist (dep (sort val #'string<))
-                    (insert-text-button dep 'action
-                                        (lambda (but)
-                                          (arch-pkg-describe-package
-                                           (car (split-string (button-label but) ":")))))
-                    (insert " "))
-                  (insert "\n"))
-                 (t (insert (format "%s\n" val)))))))
-          (goto-char (point-min))
-          (setq buffer-read-only t)
-          (help-mode)
-          (pop-to-buffer buf))))))
+      (help-setup-xref (list #'arch-pkg-describe-package name)
+                       (called-interactively-p 'interactive))
+
+      (with-help-window (help-buffer)
+        (with-current-buffer standard-output
+          (let ((inhibit-read-only t))
+            (erase-buffer)
+            (setq buffer-file-coding-system 'utf-8)
+
+            ;; insert
+            (dolist (kc key-col)
+              (let ((val (gethash (car kc) pkg))
+                    (key (cdr kc)))
+                (when val
+                  (insert (propertize (string-pad (concat key ": ") (+ width 3) 32 t)
+                                      'font-lock-face '(bold font-lock-function-name-face)))
+                  (cond
+                   ((string= key "Url")
+                    (help-insert-xref-button val 'help-url val)
+                    (insert "\n"))
+                   ((or (string= key "Build Date")
+                        (string= key "Install Date"))
+                    (insert (arch-pkg--format-date val) "\n"))
+                   ((or (string= key "Installed Size")
+                        (string= key "Download Size"))
+                    (insert (arch-pkg--format-size val) "\n"))
+                   ((or (string= key "Dependencies")
+                        (string= key "Required By")
+                        (string= key "Optional"))
+                    (dolist (dep (sort val #'string<))
+                      (help-insert-xref-button dep 'help-arch-package dep)
+                      (insert " "))
+                    (insert "\n"))
+                   ((string= key "Licenses")
+                    (insert (string-join val ", ") "\n"))
+                   (t (insert (format "%s\n" val)))))))
+            (help-mode)))))))
 
 ;; (maphash (lambda (k v)
 ;;            (prin1 k (current-buffer))
