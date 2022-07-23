@@ -73,6 +73,10 @@
     (format "%.1f GiB" (/ n 1024.0 1024.0 1024.0)))))
 
 
+(defun arch-pkg--extract-package-name (s)
+  (string-match (rx line-start (group (+ (any lower numeric "-" "+"))) (* any) line-end) s)
+  (match-string 1 s))
+
 
 ;;;; Functions
 
@@ -254,7 +258,8 @@ into a hashmap and return it."
                            (vector (cons (gethash "NAME" pkg)
                                          (list
                                           'action
-                                          (lambda (but) (arch-pkg-describe-package (button-label but)))))
+                                          (lambda (but)
+                                            (arch-pkg-describe-package (arch-pkg--extract-package-name (button-label but))))))
                                    (gethash "VERSION" pkg)
                                    (or (gethash "REPOSITORY" pkg) "")
                                    (arch-pkg--format-status
@@ -285,7 +290,7 @@ into a hashmap and return it."
 
 
 ;;;###autoload
-(defun arch-pkg-describe-package (package)
+(defun arch-pkg-describe-package (&optional package)
   "Display the full documentation of Archlinux package PACKAGE (string or symbol)."
   (interactive
    (list
@@ -301,8 +306,10 @@ into a hashmap and return it."
         (setq package (tabulated-list-get-id))
       (error "Package name needed")))
 
-  (setq package (intern (car (split-string (if (stringp package) package (symbol-name package))
-                                           ":"))))
+  (setq package (intern (arch-pkg--extract-package-name
+                         (if (stringp package) package (symbol-name package)))))
+
+  (message "PACKAGE NAME: %s" package)
 
   (let ((pkg (gethash package arch-pkg-db))
         (key-col '(("NAME" . "Name")
