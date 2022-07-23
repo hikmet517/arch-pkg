@@ -126,7 +126,7 @@ into a hashmap and return it."
     (goto-char (point-min))
 
     (let ((i (point-min))
-          (pkgs (make-hash-table :test #'equal))
+          (pkgs (make-hash-table))
           (buf-size (buffer-size)))
 
       (while (< i buf-size)
@@ -139,7 +139,7 @@ into a hashmap and return it."
                      (not (string= typeflag "x")))
 
             (let ((desc (arch-pkg--parse-desc (+ i 512) (+ i 512 size))))
-              (puthash (gethash "NAME" desc) desc pkgs)))
+              (puthash (intern (gethash "NAME" desc)) desc pkgs)))
 
           (setq i (+ (* (ceiling (/ (+ (1- i) 512 size) 512.0)) 512) 1))))
       pkgs)))
@@ -147,7 +147,7 @@ into a hashmap and return it."
 
 (defun arch-pkg--read-sync-db ()
   "Read sync package database under `arch-pkg-sync-db-path' (all repos)."
-  (let ((repo-all (make-hash-table :test #'equal)))
+  (let ((repo-all (make-hash-table)))
     (dolist (repo-file (directory-files arch-pkg-sync-db-path))
       (unless (or (string= repo-file ".")
                   (string= repo-file ".."))
@@ -162,7 +162,7 @@ into a hashmap and return it."
 
 (defun arch-pkg--read-local-db ()
   "Read local packages, all files under `arch-pkg-local-db-path'."
-  (let ((db (make-hash-table :test #'equal)))
+  (let ((db (make-hash-table)))
     (dolist (dir (directory-files arch-pkg-local-db-path))
       (unless (or (string= dir ".")
                   (string= dir ".."))
@@ -171,7 +171,7 @@ into a hashmap and return it."
             (let ((desc (arch-pkg--read-desc-file (expand-file-name
                                                    "desc"
                                                    pkg-dir))))
-              (puthash (gethash "NAME" desc) desc db))))))
+              (puthash (intern (gethash "NAME" desc)) desc db))))))
     db))
 
 
@@ -179,7 +179,7 @@ into a hashmap and return it."
   "Read local and sync databases and merge them into `arch-pkg-db'."
   (let ((arch-pkg-sync-db (arch-pkg--read-sync-db))
         (arch-pkg-local-db (arch-pkg--read-local-db)))
-    (setq arch-pkg-db (make-hash-table :test #'equal))
+    (setq arch-pkg-db (make-hash-table))
     ;; add everything in sync-db to db
     (maphash (lambda (k v) (puthash k v arch-pkg-db)) arch-pkg-sync-db)
 
@@ -234,7 +234,8 @@ into a hashmap and return it."
           ("Repository" 12 t)
           ("Status" 12 t)
           ("Date" 17 t)
-          ("Size" 0 t)]))
+          ("Size" 0 t)])
+  (setq tabulated-list-padding 2))
 
 
 ;;;###autoload
@@ -265,8 +266,7 @@ into a hashmap and return it."
                                    (let ((size (gethash "SIZE" pkg)))
                                      (if size
                                          (arch-pkg--format-size size)
-                                       ""))
-                                   ))
+                                       ""))))
                      arch-pkg-list))
              arch-pkg-db)
 
@@ -286,7 +286,7 @@ into a hashmap and return it."
 
 ;;;###autoload
 (defun arch-pkg-describe-package (package)
-  "Display the full documentation of Archlinux package PACKAGE (a string)."
+  "Display the full documentation of Archlinux package PACKAGE (string or symbol)."
   (interactive
    (list
     (progn
@@ -301,7 +301,8 @@ into a hashmap and return it."
         (setq package (tabulated-list-get-id))
       (error "Package name needed")))
 
-  (setq package (car (split-string package ":")))
+  (setq package (intern (car (split-string (if (stringp package) package (symbol-name package))
+                                           ":"))))
 
   (let ((pkg (gethash package arch-pkg-db))
         (key-col '(("NAME" . "Name")
