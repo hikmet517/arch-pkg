@@ -74,8 +74,10 @@
 
 
 (defun arch-pkg--extract-package-name (s)
+  "Extract package name from string S."
   (string-match (rx line-start (group (+ (any lower numeric "-" "+"))) (* any) line-end) s)
   (match-string 1 s))
+
 
 
 ;;;; Functions
@@ -207,9 +209,9 @@ into a hashmap and return it."
                               ;; add dep to required by field
                               (puthash k deps pkg)
                               (dolist (d deps)
-                                (let ((dep-pkg (gethash d arch-pkg-db)))
+                                (let ((dep-pkg (gethash (intern (arch-pkg--extract-package-name d)) arch-pkg-db)))
                                   (when dep-pkg
-                                    (push name (gethash "REQUIREDBY" dep-pkg)))))))
+                                    (push (symbol-name name) (gethash "REQUIREDBY" dep-pkg)))))))
                            ((or (string= k "OPTDEPENDS")
                                 (string= k "LICENSE"))
                             (puthash k (split-string v "\n") pkg))
