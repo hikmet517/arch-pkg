@@ -11,8 +11,8 @@
 ;;; TODO:
 ;; print installed files
 ;; find optional dependency status
-;; show package url
-;; fontconfig requires libexpat.so=1-64, which is in expat package
+;; test: fontconfig requires libexpat.so=1-64, which is in expat package
+;; test: gcc depends on some .so libs
 ;; acpi_call-dkms and acpi_call-lts both provide acpi_call
 
 ;;; Code:
@@ -32,7 +32,9 @@
 
 (defvar arch-pkg-db nil "Database (local and sync merged).")
 (defvar arch-pkg-list '() "Package list for `tabulated-list-entries'.")
-(defvar arch-pkg-providedby nil "Database for sonames from PROVIDE field.  soname => (package1 package2)")
+(defvar arch-pkg-providedby nil "Database for sonames from PROVIDE field.
+soname => (package1 package2)
+string => (symbols)")
 
 (defvar arch-pkg-list-mode-map
   (let ((map (make-sparse-keymap)))
@@ -77,17 +79,11 @@
     (format "%.1f GiB" (/ n 1024.0 1024.0 1024.0)))))
 
 
-(defun arch-pkg--extract-package-name (s)
-  "Extract package name from string S."
-  (string-match (rx line-start (group (+ (any lower numeric "-" "+" "."))) (* any) line-end) s)
-  (match-string 1 s))
-
-
 (defun arch-pkg--parse-depends-str (s)
   "Parse dependecy string S.
 Example: libglib-2.0.so=0-64 returns ('libglib-2.0.so' '=' '0-64')"
   (string-match (rx line-start
-                    (group (+ (any lower numeric "-" "+" ".")))
+                    (group (+ (any lower numeric "_" "-" "+" ".")))
                     (group (? (* (or "<" "=" ">"))))
                     (group (? (* not-newline)))
                     line-end)
@@ -96,6 +92,10 @@ Example: libglib-2.0.so=0-64 returns ('libglib-2.0.so' '=' '0-64')"
         (match-string 2 s)
         (match-string 3 s)))
 
+
+(defun arch-pkg--extract-package-name (s)
+  "Extract package name from string S."
+  (car (arch-pkg--parse-depends-str s)))
 
 
 
@@ -252,11 +252,14 @@ into a hashmap and return it."
                            ((string= k "DEPENDS")
                             (puthash k (split-string v "\n") pkg))
                            ((string= k "PROVIDES")
-                            (dolist (p (split-string v "\n"))
-                              (when (not (member name (gethash p arch-pkg-providedby)))
-                                (push name (gethash p arch-pkg-providedby)))))
+                            (let ((splitted (split-string v "\n")))
+                              (dolist (p splitted)
+                                (when (not (member name (gethash p arch-pkg-providedby)))
+                                  (push name (gethash (arch-pkg--extract-package-name p) arch-pkg-providedby))))
+                              (puthash k splitted pkg)))
                            ((or (string= k "OPTDEPENDS")
-                                (string= k "LICENSE"))
+                                (string= k "LICENSE")
+                                (string= k "GROUPS"))
                             (puthash k (split-string v "\n") pkg))
                            ((or (string= k "BUILDDATE")
                                 (string= k "INSTALLDATE")
@@ -271,7 +274,7 @@ into a hashmap and return it."
     ;; create REQUIREDBY field
     (maphash (lambda (name pkg)
                (dolist (dep (gethash "DEPENDS" pkg))
-                 (let ((depname (intern (car (arch-pkg--parse-depends-str dep)))))
+                 (let ((depname (intern (arch-pkg--extract-package-name dep))))
                    (if (gethash depname arch-pkg-db)
                        (push (symbol-name name) (gethash "REQUIREDBY" (gethash depname arch-pkg-db)))
                      (dolist (p (gethash (symbol-name depname) arch-pkg-providedby))
@@ -337,8 +340,7 @@ into a hashmap and return it."
 
   ;; create buffer and display
   (let ((buf (get-buffer-create "Arch Packages")))
-    (display-buffer buf)
-    (set-buffer buf)
+    (pop-to-buffer-same-window buf)
     (arch-pkg-list-mode)
     (setq tabulated-list-entries arch-pkg-list)
     (tabulated-list-init-header)
@@ -362,10 +364,12 @@ into a hashmap and return it."
         (setq package (tabulated-list-get-id))
       (error "Package name needed")))
 
-  (setq package (intern (car (arch-pkg--parse-depends-str
-                              (if (stringp package)
-                                  package
-                                (symbol-name package))))))
+  (setq package (intern (arch-pkg--extract-package-name
+                         (if (stringp package)
+                             package
+                           (symbol-name package)))))
+
+  (message "PACKAGE %s" package)
 
   (let ((pkg (gethash package arch-pkg-db))
         (key-col '(("NAME" . "Name")
@@ -377,6 +381,7 @@ into a hashmap and return it."
                    ("REASON" . "Status")
                    ("REPOSITORY" . "Repository")
                    ("GROUPS" . "Groups")
+                   ("PROVIDES" . "Provides")
                    ("DEPENDS" . "Dependencies")
                    ("OPTDEPENDS" . "Optional")
                    ("REQUIREDBY" . "Required By")
@@ -391,10 +396,13 @@ into a hashmap and return it."
     (when (not pkg)
       (let ((pkgs (gethash (symbol-name package) arch-pkg-providedby)))
         (when pkgs
-          (setq package (intern (completing-read "Multiple packages provides this: "
-                                                 (mapcar #'symbol-name pkgs)
-                                                 nil
-                                                 t)))
+          (if (cadr pkgs)
+              (setq package (intern (completing-read (format "%s is provided by multiple packages: "
+                                                             (symbol-name package))
+                                                     (mapcar #'symbol-name pkgs)
+                                                     nil
+                                                     t)))
+            (setq package (car pkgs)))
           (setq pkg (gethash package arch-pkg-db)))))
 
     (when pkg
@@ -440,7 +448,10 @@ into a hashmap and return it."
                         (help-insert-xref-button dep 'help-arch-package dep)
                         (insert " "))
                       (insert "\n"))
-                     ((string= key "Licenses")
+                     ((string= key "Provides")
+                      (insert (string-join val " ") "\n"))
+                     ((or (string= key "Licenses")
+                          (string= key "Groups"))
                       (insert (string-join val ", ") "\n"))
                      (t (insert (format "%s\n" val)))))))
               (help-mode))))))))
