@@ -39,6 +39,7 @@ string => (symbols)")
 (defvar arch-pkg-list-mode-map
   (let ((map (make-sparse-keymap)))
     (define-key map [(control ?m)] #'arch-pkg-describe-package)
+    (define-key map "r" #'arch-pkg-refresh)
     map))
 
 (define-button-type 'help-arch-package
@@ -61,9 +62,11 @@ string => (symbols)")
   (format-time-string "%Y-%m-%d %H:%M" n))
 
 
-(defun arch-pkg--format-status (n)
+(defun arch-pkg--format-status (n &optional show-not-installed)
   "Format package status N (an integer)."
-  (aref ["installed" "dependency" ""] n))
+  (if show-not-installed
+      (aref ["installed" "dependency" "not installed"] n)
+    (aref ["installed" "dependency" ""] n)))
 
 
 (defun arch-pkg--format-size (n)
@@ -268,7 +271,10 @@ into a hashmap and return it."
                                 (string= k "CSIZE")
                                 (string= k "REASON"))
                             (puthash k (string-to-number v) pkg))))
-                        pkg))
+                        pkg)
+               ;; if there is no reason put 2 (not installed)
+               (unless (gethash "REASON" pkg)
+                 (puthash "REASON" 2 pkg)))
              arch-pkg-db)
 
     ;; create REQUIREDBY field
@@ -283,7 +289,6 @@ into a hashmap and return it."
              arch-pkg-db)))
 
 
-;;;###autoload
 (define-derived-mode arch-pkg-list-mode tabulated-list-mode "Arch Package List"
   "Major mode for browsing a list of Archlinux packages.
 
@@ -302,8 +307,16 @@ into a hashmap and return it."
 
 
 ;;;###autoload
+(defun arch-pkg-refresh ()
+  "Re-read database and list packages."
+  (interactive)
+  (arch-pkg--create-db)
+  (arch-pkg-list-packages))
+
+
+;;;###autoload
 (defun arch-pkg-list-packages ()
-  "Display a list of packages."
+  "Display a list of Archlinux packages."
   (interactive)
 
   ;; read merge sync and local data and merge them into db
@@ -339,7 +352,7 @@ into a hashmap and return it."
                                                                      (car s2))))))
 
   ;; create buffer and display
-  (let ((buf (get-buffer-create "Arch Packages")))
+  (let ((buf (get-buffer-create "*Arch Packages*")))
     (pop-to-buffer-same-window buf)
     (arch-pkg-list-mode)
     (setq tabulated-list-entries arch-pkg-list)
@@ -378,6 +391,7 @@ into a hashmap and return it."
                    ("URL" . "Url")
                    ("" . "Package Url")
                    ("LICENSE" . "Licenses")
+                   ("Status" . "REASON")
                    ("REASON" . "Status")
                    ("REPOSITORY" . "Repository")
                    ("GROUPS" . "Groups")
@@ -453,6 +467,8 @@ into a hashmap and return it."
                      ((or (string= key "Licenses")
                           (string= key "Groups"))
                       (insert (string-join val ", ") "\n"))
+                     ((string= key "Status")
+                      (insert (arch-pkg--format-status val 'show-not-installed) "\n"))
                      (t (insert (format "%s\n" val)))))))
               (help-mode))))))))
 
