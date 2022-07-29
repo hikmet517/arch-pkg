@@ -3,16 +3,16 @@
 ;; Author: Hikmet Altıntaş (hikmet1517@gmail.com)
 ;; Keywords: convenience
 ;; URL: "https://github.com/hikmet517/arch-pkg"
-;; Version: 0.1
+;; Version: 0.2
 
 ;;; Commentary:
 ;; Browse Archlinux packages in Emacs, using an interface similar to package.el
 
 ;;; TODO:
 ;; print installed files
-;; find optional dependency status
 ;; test: fontconfig requires libexpat.so=1-64, which is in expat package
 ;; test: gcc depends on some .so libs
+;; test: jack as a feature
 ;; acpi_call-dkms and acpi_call-lts both provide acpi_call
 
 ;;; Code:
@@ -31,8 +31,8 @@
 (defconst arch-pkg-local-db-path "/var/lib/pacman/local/")
 
 (defvar arch-pkg-db nil "Database (local and sync merged).")
-(defvar arch-pkg-list '() "Package list for `tabulated-list-entries'.")
-(defvar arch-pkg-providedby nil "Database for sonames from PROVIDE field.
+(defvar arch-pkg-providedby nil
+  "Database for sonames and features from PROVIDE field.
 soname => (package1 package2)
 string => (symbols)")
 
@@ -52,9 +52,30 @@ string => (symbols)")
 (defun arch-pkg-reset-internal-data ()
   "Reset internal data, for debugging only."
   (interactive)
-  (setq arch-pkg-list nil
-        arch-pkg-db nil
+  (setq arch-pkg-db nil
         arch-pkg-providedby nil))
+
+
+(defun arch-pkg--print-hashmap (map)
+  "Print hash-map MAP in current buffer.
+For debugging."
+  (maphash (lambda (k v)
+             (prin1 k (current-buffer))
+             (insert ": ")
+             (prin1 v (current-buffer))
+             (insert "\n"))
+           map))
+
+
+(defun arch-pkg--print-package (s)
+  "Print the package S in current buffer.
+For debugging."
+  (when (stringp s)
+    (setq s (intern s)))
+  (let ((pkg (gethash s arch-pkg-db)))
+    (if pkg
+        (arch-pkg--print-hashmap pkg)
+      (insert "package not found"))))
 
 
 (defun arch-pkg--format-date (n)
@@ -63,7 +84,8 @@ string => (symbols)")
 
 
 (defun arch-pkg--format-status (n &optional show-not-installed)
-  "Format package status N (an integer)."
+  "Format package status N (an integer).
+When SHOW-NOT-INSTALLED is t, print 'not installed'."
   (if show-not-installed
       (aref ["installed" "dependency" "not installed"] n)
     (aref ["installed" "dependency" ""] n)))
@@ -97,30 +119,19 @@ Example: libglib-2.0.so=0-64 returns ('libglib-2.0.so' '=' '0-64')"
 
 
 (defun arch-pkg--extract-package-name (s)
-  "Extract package name from string S."
+  "Extract package name from string S.
+Returns string."
   (car (arch-pkg--parse-depends-str s)))
+
+
+(defun arch-pkg--propertize (s)
+  "Add properties to string S.
+Used in `arch-pkg-describe-package'"
+  (propertize s 'font-lock-face '(bold font-lock-function-name-face)))
 
 
 
 ;;;; Functions
-
-(defun arch-pkg--find-pkg-from-dependency (s)
-  "Find list of packages that provides dependency given in string S.
-Example: finds 'libisl' from string 'libisl.so=23-64'."
-  (setq s (arch-pkg--extract-package-name s))
-  (if (string-suffix-p ".so" s)
-      (let ((lst '()))
-        (maphash (lambda (name pkg)
-                   (let ((provides (gethash "PROVIDES" pkg)))
-                     (when provides
-                       (dolist (pr provides)
-                         (when (string= (arch-pkg--extract-package-name pr)
-                                        s)
-                           (push name lst))))))
-                 arch-pkg-db)
-        lst)
-    (list (intern s))))
-
 
 (defun arch-pkg--parse-desc (beg end)
   "Parse descr buffer given between BEG and END."
@@ -197,7 +208,7 @@ into a hashmap and return it."
     (dolist (repo-file (directory-files arch-pkg-sync-db-path))
       (unless (or (string= repo-file ".")
                   (string= repo-file ".."))
-        (message "reading: %s" (expand-file-name repo-file arch-pkg-sync-db-path))
+        (message "Reading: %s" (expand-file-name repo-file arch-pkg-sync-db-path))
         (let ((repo (arch-pkg--read-gz (expand-file-name repo-file arch-pkg-sync-db-path))))
           (maphash (lambda (name pkg)
                      (puthash "REPOSITORY" (file-name-base repo-file) pkg)
@@ -209,6 +220,7 @@ into a hashmap and return it."
 (defun arch-pkg--read-local-db ()
   "Read local packages, all files under `arch-pkg-local-db-path'."
   (let ((db (make-hash-table)))
+    (message "Reading files under: %s" arch-pkg-local-db-path)
     (dolist (dir (directory-files arch-pkg-local-db-path))
       (unless (or (string= dir ".")
                   (string= dir ".."))
@@ -249,20 +261,16 @@ into a hashmap and return it."
              arch-pkg-local-db)
 
     ;; parse some fieds
-    (maphash (lambda (name pkg)
+    (maphash (lambda (_name pkg)
                (maphash (lambda (k v)
                           (cond
-                           ((string= k "DEPENDS")
-                            (puthash k (split-string v "\n") pkg))
-                           ((string= k "PROVIDES")
-                            (let ((splitted (split-string v "\n")))
-                              (dolist (p splitted)
-                                (when (not (member name (gethash p arch-pkg-providedby)))
-                                  (push name (gethash (arch-pkg--extract-package-name p) arch-pkg-providedby))))
-                              (puthash k splitted pkg)))
-                           ((or (string= k "OPTDEPENDS")
+                           ((or (string= k "DEPENDS")
+                                (string= k "PROVIDES")
+                                (string= k "OPTDEPENDS")
                                 (string= k "LICENSE")
-                                (string= k "GROUPS"))
+                                (string= k "GROUPS")
+                                (string= k "MAKEDEPENDS")
+                                (string= k "CHECKDEPENDS"))
                             (puthash k (split-string v "\n") pkg))
                            ((or (string= k "BUILDDATE")
                                 (string= k "INSTALLDATE")
@@ -272,20 +280,67 @@ into a hashmap and return it."
                                 (string= k "REASON"))
                             (puthash k (string-to-number v) pkg))))
                         pkg)
-               ;; if there is no reason put 2 (not installed)
+               ;; if there is no REASON put 2 (not installed)
                (unless (gethash "REASON" pkg)
                  (puthash "REASON" 2 pkg)))
              arch-pkg-db)
 
-    ;; create REQUIREDBY field
+    ;; fill arch-pkg-providedby
     (maphash (lambda (name pkg)
-               (dolist (dep (gethash "DEPENDS" pkg))
-                 (let ((depname (intern (arch-pkg--extract-package-name dep))))
-                   (if (gethash depname arch-pkg-db)
-                       (push (symbol-name name) (gethash "REQUIREDBY" (gethash depname arch-pkg-db)))
-                     (dolist (p (gethash (symbol-name depname) arch-pkg-providedby))
-                       (when (gethash p arch-pkg-db)
-                         (push (symbol-name name) (gethash "REQUIREDBY" (gethash p arch-pkg-db)))))))))
+               (let ((provides (gethash "PROVIDES" pkg)))
+                 (when provides
+                   (dolist (p provides)
+                     (when (not (member name (gethash p arch-pkg-providedby)))
+                       (push name (gethash (arch-pkg--extract-package-name p) arch-pkg-providedby)))))))
+             arch-pkg-db)
+
+    ;; create additional fields: REQUIREDBY, OPTIONALFOR
+    (maphash (lambda (name pkg)
+               ;; create REQUIREDBY from DEPENDS
+               (when-let ((deps (gethash "DEPENDS" pkg)))
+                 (dolist (dep deps)
+                   (let* ((depname (intern (arch-pkg--extract-package-name dep)))
+                          (deppkg (gethash depname arch-pkg-db)))
+                     (if deppkg
+                         ;; if package exists, add it
+                         (when (not (member name (gethash "REQUIREDBY" deppkg)))
+                           (push name (gethash "REQUIREDBY" deppkg)))
+                       ;; if it doesn't exist, it might be a feature, check `arch-pkg-providedby'
+                       (dolist (p (gethash (symbol-name depname) arch-pkg-providedby))
+                         (let ((pr (gethash p arch-pkg-db)))
+                           (if pr
+                               (when (not (member name (gethash "REQUIREDBY" pr)))
+                                 (push name (gethash "REQUIREDBY" pr)))
+                             (message "Package '%s' not found for REQUIREDBY field" p))))))))
+
+
+               ;; create OPTIONALFOR from OPTDEPENDS
+               (when-let ((deps (gethash "OPTDEPENDS" pkg)))
+                 (dolist (dep deps)
+                   (let* ((depname (intern (arch-pkg--extract-package-name dep)))
+                          (deppkg (gethash depname arch-pkg-db)))
+                     (if deppkg
+                         ;; if package exists, add it
+                         (when (not (member name (gethash "OPTIONALFOR" deppkg)))
+                           (push name (gethash "OPTIONALFOR" deppkg)))
+                       ;; if it doesn't exist, it might be a feature, check `arch-pkg-providedby'
+                       (dolist (p (gethash (symbol-name depname) arch-pkg-providedby))
+                         (let ((pr (gethash p arch-pkg-db)))
+                           (if pr
+                               (when (not (member name (gethash "OPTIONALFOR" pr)))
+                                 (push name (gethash "OPTIONALFOR" pr)))
+                             (message "Package '%s' not found for OPTIONALFOR field" p)))))))))
+             arch-pkg-db)
+
+    (maphash (lambda (_name pkg)
+               (when-let ((reqs (gethash "REQUIREDBY" pkg)))
+                 (puthash "REQUIREDBY"
+                          (sort reqs (lambda (s1 s2) (string< (symbol-name s1) (symbol-name s2))))
+                          pkg))
+               (when-let ((opts (gethash "OPTIONALFOR" pkg)))
+                 (puthash "OPTIONALFOR"
+                          (sort opts (lambda (s1 s2) (string< (symbol-name s1) (symbol-name s2))))
+                          pkg)))
              arch-pkg-db)))
 
 
@@ -324,7 +379,7 @@ into a hashmap and return it."
     (arch-pkg--create-db))
 
   ;; create list for tabulated-list-entries
-  (unless arch-pkg-list
+  (let ((arch-pkg-list nil))
     (maphash (lambda (name pkg)
                (push (list name
                            (vector (cons (gethash "NAME" pkg)
@@ -349,15 +404,15 @@ into a hashmap and return it."
 
     ;; sort by package name
     (setq arch-pkg-list (sort arch-pkg-list (lambda (s1 s2) (string< (car s1)
-                                                                     (car s2))))))
+                                                                     (car s2)))))
 
-  ;; create buffer and display
-  (let ((buf (get-buffer-create "*Arch Packages*")))
-    (pop-to-buffer-same-window buf)
-    (arch-pkg-list-mode)
-    (setq tabulated-list-entries arch-pkg-list)
-    (tabulated-list-init-header)
-    (tabulated-list-print)))
+    ;; create buffer and display
+    (let ((buf (get-buffer-create "*Arch Packages*")))
+      (pop-to-buffer-same-window buf)
+      (arch-pkg-list-mode)
+      (setq tabulated-list-entries arch-pkg-list)
+      (tabulated-list-init-header)
+      (tabulated-list-print))))
 
 
 ;;;###autoload
@@ -382,95 +437,122 @@ into a hashmap and return it."
                              package
                            (symbol-name package)))))
 
-  (message "PACKAGE %s" package)
+  (let ((pkg (gethash package arch-pkg-db)))
 
-  (let ((pkg (gethash package arch-pkg-db))
-        (key-col '(("NAME" . "Name")
-                   ("VERSION" . "Version")
-                   ("DESC" . "Description")
-                   ("URL" . "Url")
-                   ("" . "Package Url")
-                   ("LICENSE" . "Licenses")
-                   ("Status" . "REASON")
-                   ("REASON" . "Status")
-                   ("REPOSITORY" . "Repository")
-                   ("GROUPS" . "Groups")
-                   ("PROVIDES" . "Provides")
-                   ("DEPENDS" . "Dependencies")
-                   ("OPTDEPENDS" . "Optional")
-                   ("REQUIREDBY" . "Required By")
-                   ("ARCH" . "Architecture")
-                   ("PACKAGER" . "Maintainer")
-                   ("BUILDDATE" . "Build Date")
-                   ("INSTALLDATE" . "Install Date")
-                   ("CSIZE" . "Download Size")
-                   ("ISIZE" . "Installed Size"))))
-
-    ;; if not found, this may be something provided by some other packages
     (when (not pkg)
-      (let ((pkgs (gethash (symbol-name package) arch-pkg-providedby)))
-        (when pkgs
-          (if (cadr pkgs)
-              (setq package (intern (completing-read (format "%s is provided by multiple packages: "
-                                                             (symbol-name package))
-                                                     (mapcar #'symbol-name pkgs)
-                                                     nil
-                                                     t)))
-            (setq package (car pkgs)))
-          (setq pkg (gethash package arch-pkg-db)))))
+      ;; not found, this may be a feature provided by some other packages
+      (when-let ((pkgs (gethash (symbol-name package) arch-pkg-providedby)))
+        (if (cadr pkgs)
+            ;; multiple choises, ask user
+            (setq package (intern (completing-read (format "%s is provided by multiple packages: "
+                                                           (symbol-name package))
+                                                   (mapcar #'symbol-name pkgs)
+                                                   nil
+                                                   t)))
+          ;; only one choise
+          (setq package (car pkgs)))
+        (setq pkg (gethash package arch-pkg-db))))
 
     (when pkg
-      (let ((width (apply #'max (mapcar (lambda (s) (length (cdr s))) key-col))))
-
+      (let ((width 20))
         (help-setup-xref (list #'arch-pkg-describe-package package)
                          (called-interactively-p 'interactive))
-
         (with-help-window (help-buffer)
           (with-current-buffer standard-output
             (let ((inhibit-read-only t))
               (erase-buffer)
               (setq buffer-file-coding-system 'utf-8)
 
-              ;; insert
-              (dolist (kc key-col)
-                (let ((val (gethash (car kc) pkg))
-                      (key (cdr kc)))
-                  (when (or val (string= "" (car kc)))
-                    (insert (propertize (string-pad (concat key ": ") (+ width 3) ?\s t)
-                                        'font-lock-face '(bold font-lock-function-name-face)))
-                    (cond
-                     ((string= key "Url")
-                      (help-insert-xref-button val 'help-url val)
-                      (insert "\n"))
-                     ((string= key "Package Url")
-                      (let ((pkg-url (format "https://archlinux.org/packages/%s/%s/%s/"
-                                             (gethash "REPOSITORY" pkg)
-                                             (gethash "ARCH" pkg)
-                                             (gethash "NAME" pkg))))
-                        (help-insert-xref-button pkg-url 'help-url pkg-url)
-                        (insert "\n")))
-                     ((or (string= key "Build Date")
-                          (string= key "Install Date"))
-                      (insert (arch-pkg--format-date val) "\n"))
-                     ((or (string= key "Installed Size")
-                          (string= key "Download Size"))
-                      (insert (arch-pkg--format-size val) "\n"))
-                     ((or (string= key "Dependencies")
-                          (string= key "Required By")
-                          (string= key "Optional"))
-                      (dolist (dep (sort val #'string<))
-                        (help-insert-xref-button dep 'help-arch-package dep)
-                        (insert " "))
-                      (insert "\n"))
-                     ((string= key "Provides")
-                      (insert (string-join val " ") "\n"))
-                     ((or (string= key "Licenses")
-                          (string= key "Groups"))
-                      (insert (string-join val ", ") "\n"))
-                     ((string= key "Status")
-                      (insert (arch-pkg--format-status val 'show-not-installed) "\n"))
-                     (t (insert (format "%s\n" val)))))))
-              (help-mode))))))))
+              (insert (arch-pkg--propertize (string-pad "Name: " width ?\s t)))
+              (insert (gethash "NAME" pkg) "\n")
+
+              (insert (arch-pkg--propertize (string-pad "Version: " width ?\s t)))
+              (insert (gethash "VERSION" pkg) "\n")
+
+              (insert (arch-pkg--propertize (string-pad "Description: " width ?\s t)))
+              (insert (gethash "DESC" pkg) "\n")
+
+              (insert (arch-pkg--propertize (string-pad "Url: " width ?\s t)))
+              (let ((url (gethash "URL" pkg)))
+                (help-insert-xref-button url 'help-url url))
+              (insert "\n")
+
+              (insert (arch-pkg--propertize (string-pad "Package Url: " width ?\s t)))
+              (let ((pkg-url (format "https://archlinux.org/packages/%s/%s/%s/"
+                                     (gethash "REPOSITORY" pkg)
+                                     (gethash "ARCH" pkg)
+                                     (gethash "NAME" pkg))))
+                (help-insert-xref-button pkg-url 'help-url pkg-url)
+                (insert "\n"))
+
+              (insert (arch-pkg--propertize (string-pad "Licenses: " width ?\s t)))
+              (insert (string-join (gethash "LICENSE" pkg) ", ") "\n")
+
+              (insert (arch-pkg--propertize (string-pad "Status: " width ?\s t)))
+              (insert (arch-pkg--format-status (gethash "REASON" pkg) 'show-not-installed) "\n")
+
+              (insert (arch-pkg--propertize (string-pad "Repository: " width ?\s t)))
+              (insert (gethash "REPOSITORY" pkg) "\n")
+
+              (when-let ((grp (gethash "GROUPS" pkg)))
+                (insert (arch-pkg--propertize (string-pad "Groups: " width ?\s t)))
+                (insert (string-join grp " ") "\n"))
+
+              (when-let ((prs (gethash "PROVIDES" pkg)))
+                (insert (arch-pkg--propertize (string-pad "Provides: " width ?\s t)))
+                (dolist (pr prs)
+                  (help-insert-xref-button pr 'help-arch-package pr)
+                  (insert " "))
+                (insert "\n"))
+
+              (insert (arch-pkg--propertize (string-pad "Dependencies: " width ?\s t)))
+              (if-let ((deps (gethash "DEPENDS" pkg)))
+                  (dolist (dep deps)
+                    (help-insert-xref-button dep 'help-arch-package dep)
+                    (insert " "))
+                (insert "None"))
+              (insert "\n")
+
+              (insert (arch-pkg--propertize (string-pad "Required By: " width ?\s t)))
+              (if-let ((reqs (gethash "REQUIREDBY" pkg)))
+                  (dolist (req reqs)
+                    (help-insert-xref-button (symbol-name req) 'help-arch-package req)
+                    (insert " "))
+                (insert "None"))
+              (insert "\n")
+
+              (when-let ((opts (gethash "OPTIONALFOR" pkg)))
+                (insert (arch-pkg--propertize (string-pad "Optional for: " width ?\s t)))
+                (dolist (opt opts)
+                  (help-insert-xref-button (symbol-name opt) 'help-arch-package opt)
+                  (insert " "))
+                (insert "\n"))
+
+              (when-let ((cnf (gethash "CONFLICTS" pkg)))
+                (insert (arch-pkg--propertize (string-pad "Conflicts with: " width ?\s t)))
+                (insert cnf "\n"))
+
+              (insert (arch-pkg--propertize (string-pad "Architecture: " width ?\s t)))
+              (insert (gethash "ARCH" pkg) "\n")
+
+              (insert (arch-pkg--propertize (string-pad "Maintainer: " width ?\s t)))
+              (insert (gethash "PACKAGER" pkg) "\n")
+
+              (insert (arch-pkg--propertize (string-pad "Build Date: " width ?\s t)))
+              (insert (arch-pkg--format-date (gethash "BUILDDATE" pkg)) "\n")
+
+              (insert (arch-pkg--propertize (string-pad "Install Date: " width ?\s t)))
+              (insert (arch-pkg--format-date (gethash "INSTALLDATE" pkg)) "\n")
+
+              (insert (arch-pkg--propertize (string-pad "Install Size: " width ?\s t)))
+              (insert (arch-pkg--format-size (gethash "ISIZE" pkg)) "\n")
+
+              (insert (arch-pkg--propertize (string-pad "Download Size: " width ?\s t)))
+              (insert (arch-pkg--format-size (gethash "CSIZE" pkg)) "\n")
+
+              (when-let ((val (gethash "VALIDATION" pkg)))
+                (insert (arch-pkg--propertize (string-pad "Validation: " width ?\s t)))
+                (insert val "\n")))))))))
 
 (provide 'arch-pkg)
 ;;; arch-pkg.el ends here
