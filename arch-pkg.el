@@ -10,10 +10,11 @@
 
 ;;; TODO:
 ;; print installed files
+;; take versions into account
 ;; test: fontconfig requires libexpat.so=1-64, which is in expat package
 ;; test: gcc depends on some .so libs
 ;; test: jack as a feature
-;; acpi_call-dkms and acpi_call-lts both provide acpi_call
+;; test: acpi_call-dkms and acpi_call-lts both provide acpi_call
 
 ;;; Code:
 
@@ -454,7 +455,7 @@ into a hashmap and return it."
         (setq pkg (gethash package arch-pkg-db))))
 
     (when pkg
-      (let ((width 20))
+      (let ((width 17))
         (help-setup-xref (list #'arch-pkg-describe-package package)
                          (called-interactively-p 'interactive))
         (with-help-window (help-buffer)
@@ -512,6 +513,16 @@ into a hashmap and return it."
                     (insert " "))
                 (insert "None"))
               (insert "\n")
+
+              (when-let ((opts (gethash "OPTDEPENDS" pkg)))
+                (insert (arch-pkg--propertize (string-pad "Optional: " width ?\s t)))
+                (dolist (opt opts)
+                  (let ((splitted (split-string opt ": ")))
+                    (help-insert-xref-button (car splitted) 'help-arch-package (car splitted))
+                    (when (cadr splitted)
+                      (insert ": " (cadr splitted)))
+                    (insert " ")))
+                (insert "\n"))
 
               (insert (arch-pkg--propertize (string-pad "Required By: " width ?\s t)))
               (if-let ((reqs (gethash "REQUIREDBY" pkg)))
