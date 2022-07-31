@@ -40,13 +40,33 @@ string => (symbols)")
 (defvar arch-pkg-list-mode-map
   (let ((map (make-sparse-keymap)))
     (define-key map [(control ?m)] #'arch-pkg-describe-package)
-    (define-key map "r" #'arch-pkg-refresh)
+    (define-key map "r" #'revert-buffer)
     map))
 
 (define-button-type 'help-arch-package
   :supertype 'help-xref
   'help-function 'arch-pkg-describe-package
   'help-echo (purecopy "mouse-2, RET: Describe package"))
+
+
+;;;; User options
+
+(defgroup arch-pkg nil
+  "Arch-pkg customization."
+  :group 'arch-pkg
+  :prefix "arch-pkg-"
+  :link '(url-link "https://github.com/hikmet517/arch-pkg"))
+
+(defcustom arch-pkg-install-command "sudo pacman -S %s"
+  "Package install command. %s will be replaced by package name."
+  :type '(string)
+  :group 'arch-pkg)
+
+(defcustom arch-pkg-delete-command "sudo pacman -R %s"
+  "Package delete command. %s will be replaced by package name."
+  :type '(string)
+  :group 'arch-pkg)
+
 
 
 ;;;; Helper functions
@@ -359,11 +379,12 @@ into a hashmap and return it."
           ("Status" 12 t)
           ("Date" 17 t)
           ("Size" 0 t)])
-  (setq tabulated-list-padding 2))
+  (setq tabulated-list-padding 2)
+  (setq revert-buffer-function 'arch-pkg-refresh))
 
 
 ;;;###autoload
-(defun arch-pkg-refresh ()
+(defun arch-pkg-refresh (&optional _arg _noconfirm)
   "Re-read database and list packages."
   (interactive)
   (arch-pkg--create-db)
@@ -411,6 +432,18 @@ into a hashmap and return it."
       (setq tabulated-list-entries arch-pkg-list)
       (tabulated-list-init-header)
       (tabulated-list-print))))
+
+
+(defun arch-pkg--make-button (text &rest properties)
+  "Like `package-make-button'."
+  (let ((button-text (if (display-graphic-p) text (concat "[" text "]")))
+        (button-face (if (display-graphic-p)
+                         (progn
+                           (require 'cus-edit) ; for the custom-button face
+                           'custom-button)
+                       'link)))
+    (apply #'insert-text-button button-text 'face button-face 'follow-link t
+           properties)))
 
 
 ;;;###autoload
@@ -486,8 +519,21 @@ into a hashmap and return it."
               (insert (arch-pkg--propertize (string-pad "Licenses: " width ?\s t)))
               (insert (string-join (gethash "LICENSE" pkg) ", ") "\n")
 
-              (insert (arch-pkg--propertize (string-pad "Status: " width ?\s t)))
-              (insert (arch-pkg--format-status (gethash "REASON" pkg) 'show-not-installed) "\n")
+              (let ((status (gethash "REASON" pkg)))
+                (insert (arch-pkg--propertize (string-pad "Status: " width ?\s t)))
+                (insert (arch-pkg--format-status status 'show-not-installed))
+                (insert " -- ")
+                (when (= status 0)        ; installed
+                  (arch-pkg--make-button "Delete"
+                                         'action #'arch-pkg-delete-action
+                                         'package-name package)
+                  (insert "\n"))
+                (when (= status 2)
+                  (arch-pkg--make-button "Install"
+                                         'action #'arch-pkg-install-action
+                                         'package-name package)
+                  (insert "\n")))
+
 
               (insert (arch-pkg--propertize (string-pad "Repository: " width ?\s t)))
               (insert (gethash "REPOSITORY" pkg) "\n")
@@ -561,6 +607,28 @@ into a hashmap and return it."
               (when-let ((val (gethash "VALIDATION" pkg)))
                 (insert (arch-pkg--propertize (string-pad "Validation: " width ?\s t)))
                 (insert val "\n")))))))))
+
+
+(defun arch-pkg-delete-action (button)
+  (let ((pkg-name (button-get button 'package-name)))
+    (message "%s" (symbolp pkg-name))
+    (when (y-or-n-p (format-message "Delete package `%s'? " pkg-name))
+      (arch-pkg-delete-package pkg-name))))
+
+
+(defun arch-pkg-delete-package (package)
+  (async-shell-command (format arch-pkg-delete-command package)))
+
+
+(defun arch-pkg-install-action (button)
+  (let ((pkg-name (button-get button 'package-name)))
+    (when (y-or-n-p (format-message "Install package `%s'? " pkg-name))
+      (arch-pkg-install-package pkg-name))))
+
+
+(defun arch-pkg-install-package (package)
+  (async-shell-command (format arch-pkg-delete-command package)))
+
 
 (provide 'arch-pkg)
 ;;; arch-pkg.el ends here
