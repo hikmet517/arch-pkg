@@ -281,9 +281,9 @@ into a hashmap and return it."
                                 (string= k "REASON"))
                             (puthash k (string-to-number v) pkg))))
                         pkg)
-               ;; if there is no REASON put 2 (not installed)
+               ;; set REASON
                (unless (gethash "REASON" pkg)
-                 (puthash "REASON" 2 pkg)))
+                 (puthash "REASON" (if (gethash "INSTALLDATE" pkg) 0 2) pkg)))
              arch-pkg-db)
 
     ;; fill arch-pkg-providedby
@@ -390,10 +390,7 @@ into a hashmap and return it."
                                             (arch-pkg-describe-package (arch-pkg--extract-package-name (button-label but))))))
                                    (gethash "VERSION" pkg)
                                    (or (gethash "REPOSITORY" pkg) "")
-                                   (arch-pkg--format-status
-                                    (or (gethash "REASON" pkg)
-                                        (and (gethash "INSTALLDATE" pkg) 0)
-                                        2))
+                                   (arch-pkg--format-status (gethash "REASON" pkg))
                                    (arch-pkg--format-date
                                     (gethash "INSTALLDATE" pkg))
                                    (let ((size (gethash "SIZE" pkg)))
