@@ -28,6 +28,8 @@
 
 ;;; TODO:
 ;; print installed files
+;; add filters
+;; mode init/destruct
 ;; take versions into account
 ;; test: fontconfig requires libexpat.so=1-64, which is in expat package
 ;; test: gcc depends on some .so libs
@@ -527,11 +529,11 @@ into a hashmap and return it."
                 (help-insert-xref-button url 'help-url url))
               (insert "\n")
 
-              (insert (arch-pkg--propertize (string-pad "Package Url: " width ?\s t)))
-              (let ((pkg-url (format "https://archlinux.org/packages/%s/%s/%s/"
-                                     (gethash "REPOSITORY" pkg)
-                                     (gethash "ARCH" pkg)
-                                     (gethash "NAME" pkg))))
+              (when-let* ((repo (gethash "REPOSITORY" pkg))
+                          (arch (gethash "ARCH" pkg))
+                          (name (gethash "NAME" pkg))
+                          (pkg-url (format "https://archlinux.org/packages/%s/%s/%s/" repo arch name)))
+                (insert (arch-pkg--propertize (string-pad "Package Url: " width ?\s t)))
                 (help-insert-xref-button pkg-url 'help-url pkg-url)
                 (insert "\n"))
 
@@ -541,21 +543,24 @@ into a hashmap and return it."
               (let ((status (gethash "REASON" pkg)))
                 (insert (arch-pkg--propertize (string-pad "Status: " width ?\s t)))
                 (insert (arch-pkg--format-status status 'show-not-installed))
-                (insert " -- ")
-                (when (= status 0)        ; installed
+                (cond
+                 ((= status 0)    ; installed
+                  (insert " -- ")
                   (arch-pkg--make-button "Delete"
                                          'action #'arch-pkg-delete-action
                                          'package-name package)
                   (insert "\n"))
-                (when (= status 2)
+                 ((= status 2)          ;not installed
+                  (insert " -- ")
                   (arch-pkg--make-button "Install"
                                          'action #'arch-pkg-install-action
                                          'package-name package)
-                  (insert "\n")))
-
+                  (insert "\n"))
+                 (t                     ; status = 1, dependency
+                  (insert "\n"))))
 
               (insert (arch-pkg--propertize (string-pad "Repository: " width ?\s t)))
-              (insert (gethash "REPOSITORY" pkg) "\n")
+              (insert (gethash "REPOSITORY" pkg "") "\n")
 
               (when-let ((grp (gethash "GROUPS" pkg)))
                 (insert (arch-pkg--propertize (string-pad "Groups: " width ?\s t)))
@@ -614,14 +619,17 @@ into a hashmap and return it."
               (insert (arch-pkg--propertize (string-pad "Build Date: " width ?\s t)))
               (insert (arch-pkg--format-date (gethash "BUILDDATE" pkg)) "\n")
 
-              (insert (arch-pkg--propertize (string-pad "Install Date: " width ?\s t)))
-              (insert (arch-pkg--format-date (gethash "INSTALLDATE" pkg)) "\n")
+              (when-let ((idate (gethash "INSTALLDATE" pkg)))
+                (insert (arch-pkg--propertize (string-pad "Install Date: " width ?\s t)))
+                (insert (arch-pkg--format-date idate) "\n"))
 
-              (insert (arch-pkg--propertize (string-pad "Install Size: " width ?\s t)))
-              (insert (arch-pkg--format-size (gethash "ISIZE" pkg)) "\n")
+              (when-let ((isize (or (gethash "SIZE" pkg) (gethash "ISIZE" pkg))))
+                (insert (arch-pkg--propertize (string-pad "Install Size: " width ?\s t)))
+                (insert (arch-pkg--format-size isize) "\n"))
 
-              (insert (arch-pkg--propertize (string-pad "Download Size: " width ?\s t)))
-              (insert (arch-pkg--format-size (gethash "CSIZE" pkg)) "\n")
+              (when-let ((csize (gethash "CSIZE" pkg)))
+                (insert (arch-pkg--propertize (string-pad "Download Size: " width ?\s t)))
+                (insert (arch-pkg--format-size csize) "\n"))
 
               (when-let ((val (gethash "VALIDATION" pkg)))
                 (insert (arch-pkg--propertize (string-pad "Validation: " width ?\s t)))
