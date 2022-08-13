@@ -608,7 +608,10 @@ into a hashmap and return it."
 
               (when-let ((cnf (gethash "CONFLICTS" pkg)))
                 (insert (arch-pkg--propertize (string-pad "Conflicts with: " width ?\s t)))
-                (insert cnf "\n"))
+                (dolist (c (split-string cnf "\n"))
+                  (help-insert-xref-button c 'help-arch-package c)
+                  (insert " "))
+                (insert "\n"))
 
               (insert (arch-pkg--propertize (string-pad "Architecture: " width ?\s t)))
               (insert (gethash "ARCH" pkg) "\n")
