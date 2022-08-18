@@ -69,6 +69,12 @@ string => (symbols)")
   'help-function 'arch-pkg-describe-package
   'help-echo (purecopy "mouse-2, RET: Describe package"))
 
+(define-button-type 'help-arch-package-installed
+  :supertype 'help-xref
+  'help-function 'arch-pkg-describe-package
+  'help-echo (purecopy "mouse-2, RET: Describe package")
+  'face '(:inherit 'font-lock-keyword-face :underline t))
+
 
 ;;;; User options
 
@@ -576,7 +582,10 @@ into a hashmap and return it."
               (insert (arch-pkg--propertize (string-pad "Dependencies: " width ?\s t)))
               (if-let ((deps (gethash "DEPENDS" pkg)))
                   (dolist (dep deps)
-                    (help-insert-xref-button dep 'help-arch-package dep)
+                    (let ((p (gethash (intern (arch-pkg--extract-package-name dep)) arch-pkg-db)))
+                      (if (and p (< (gethash "REASON" p) 2))
+                          (help-insert-xref-button dep 'help-arch-package-installed dep)
+                        (help-insert-xref-button dep 'help-arch-package dep)))
                     (insert " "))
                 (insert "None"))
               (insert "\n")
@@ -585,16 +594,24 @@ into a hashmap and return it."
                 (insert (arch-pkg--propertize (string-pad "Optional: " width ?\s t)))
                 (dolist (opt opts)
                   (let ((splitted (split-string opt ": ")))
-                    (help-insert-xref-button (car splitted) 'help-arch-package (car splitted))
+                    (let ((p (gethash (intern (arch-pkg--extract-package-name (car splitted))) arch-pkg-db)))
+                      (if (and p (< (gethash "REASON" p) 2))
+                          (help-insert-xref-button (car splitted) 'help-arch-package-installed (car splitted))
+                        (help-insert-xref-button (car splitted) 'help-arch-package (car splitted))))
                     (when (cadr splitted)
                       (insert ": " (cadr splitted)))
-                    (insert " ")))
+                    (insert "\n" (make-string width ?\s))))
+                (delete-line)
+                (backward-delete-char 1)
                 (insert "\n"))
 
               (insert (arch-pkg--propertize (string-pad "Required By: " width ?\s t)))
               (if-let ((reqs (gethash "REQUIREDBY" pkg)))
                   (dolist (req reqs)
-                    (help-insert-xref-button (symbol-name req) 'help-arch-package req)
+                    (let ((p (gethash (intern (arch-pkg--extract-package-name (symbol-name req))) arch-pkg-db)))
+                      (if (and p (< (gethash "REASON" p) 2))
+                          (help-insert-xref-button (symbol-name req) 'help-arch-package-installed req)
+                        (help-insert-xref-button (symbol-name req) 'help-arch-package req)))
                     (insert " "))
                 (insert "None"))
               (insert "\n")
@@ -602,14 +619,20 @@ into a hashmap and return it."
               (when-let ((opts (gethash "OPTIONALFOR" pkg)))
                 (insert (arch-pkg--propertize (string-pad "Optional for: " width ?\s t)))
                 (dolist (opt opts)
-                  (help-insert-xref-button (symbol-name opt) 'help-arch-package opt)
+                  (let ((p (gethash (intern (arch-pkg--extract-package-name (symbol-name opt))) arch-pkg-db)))
+                    (if (and p (< (gethash "REASON" p) 2))
+                        (help-insert-xref-button (symbol-name opt) 'help-arch-package-installed opt)
+                      (help-insert-xref-button (symbol-name opt) 'help-arch-package opt)))
                   (insert " "))
                 (insert "\n"))
 
               (when-let ((cnf (gethash "CONFLICTS" pkg)))
                 (insert (arch-pkg--propertize (string-pad "Conflicts with: " width ?\s t)))
                 (dolist (c (split-string cnf "\n"))
-                  (help-insert-xref-button c 'help-arch-package c)
+                  (let ((p (gethash (intern (arch-pkg--extract-package-name c)) arch-pkg-db)))
+                    (if (and p (< (gethash "REASON" p) 2))
+                        (help-insert-xref-button c 'help-arch-package-installed c)
+                      (help-insert-xref-button c 'help-arch-package c)))
                   (insert " "))
                 (insert "\n"))
 
