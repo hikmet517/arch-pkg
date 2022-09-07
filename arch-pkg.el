@@ -27,7 +27,6 @@
 ;; Browse Archlinux packages in Emacs, using an interface similar to built-in `package.el'.
 
 ;;; TODO:
-;; print installed files
 ;; add filters
 ;; mode init/destruct
 ;; take versions into account
@@ -73,7 +72,7 @@ string => (symbols)")
   :supertype 'help-xref
   'help-function 'arch-pkg-describe-package
   'help-echo (purecopy "mouse-2, RET: Describe package")
-  'face '(:inherit 'font-lock-keyword-face :underline t))
+  'face '(:inherit font-lock-type-face :underline t))
 
 
 ;;;; User options
@@ -97,6 +96,7 @@ string => (symbols)")
 
 
 ;;;; Helper functions
+
 (defun arch-pkg-reset-internal-data ()
   "Reset internal data, for debugging only."
   (interactive)
@@ -659,7 +659,16 @@ into a hashmap and return it."
 
               (when-let ((val (gethash "VALIDATION" pkg)))
                 (insert (arch-pkg--propertize (string-pad "Validation: " width ?\s t)))
-                (insert val "\n")))))))))
+                (insert val "\n"))
+
+              (let ((status (gethash "REASON" pkg)))
+                (when (or (= status 0)
+                          (= status 1))
+                  (insert (arch-pkg--propertize (string-pad "Files: " width ?\s t)))
+                  (arch-pkg--make-button "Show files"
+                                         'action #'arch-pkg-show-files-action
+                                         'package-name (gethash "NAME" pkg)
+                                         'version (gethash "VERSION" pkg)))))))))))
 
 
 (defun arch-pkg-delete-action (button)
@@ -677,6 +686,24 @@ into a hashmap and return it."
   (let ((pkg-name (button-get button 'package-name)))
     (when (y-or-n-p (format-message "Install package `%s'? " pkg-name))
       (arch-pkg-install-package pkg-name))))
+
+
+(defun arch-pkg-show-files-action (button)
+  (let* ((pkg-name (button-get button 'package-name))
+         (version (button-get button 'version))
+         (filename (file-name-concat arch-pkg-local-db-path
+                                     (concat pkg-name "-" version)
+                                     "files")))
+    (when (file-exists-p filename)
+      (let ((buf (get-buffer-create (format "*Files of <%s>*" pkg-name))))
+        (with-current-buffer buf
+          (let ((inhibit-read-only t))
+            (erase-buffer)
+            ;; skip %FILES%
+            (insert-file-contents filename nil 8))
+          (text-mode)
+          (display-buffer buf)
+          (setq buffer-read-only t))))))
 
 
 (defun arch-pkg-install-package (package)
