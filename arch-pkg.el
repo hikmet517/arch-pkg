@@ -699,11 +699,24 @@ into a hashmap and return it."
         (with-current-buffer buf
           (let ((inhibit-read-only t))
             (erase-buffer)
-            ;; skip %FILES%
-            (insert-file-contents filename nil 8))
+            (insert-file-contents filename)
+            (beginning-of-buffer)
+            (kill-line 1)               ; kill %FILE%
+            (while (not (eobp))
+              (let ((line (buffer-substring-no-properties (line-beginning-position)
+                                                          (line-end-position))))
+                (cond
+                 ((string-empty-p line)
+                  (kill-region (point) (point-max)))
+                 ((string-suffix-p "/" line)
+                  (kill-line 1))
+                 (t
+                  (insert "/")
+                  (forward-line)))))
+            (beginning-of-buffer))
           (text-mode)
-          (display-buffer buf)
-          (setq buffer-read-only t))))))
+          (setq buffer-read-only t)
+          (display-buffer buf))))))
 
 
 (defun arch-pkg-install-package (package)
