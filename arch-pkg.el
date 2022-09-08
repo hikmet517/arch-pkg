@@ -84,12 +84,12 @@ string => (symbols)")
   :link '(url-link "https://github.com/hikmet517/arch-pkg"))
 
 (defcustom arch-pkg-install-command "sudo pacman -S %s"
-  "Package install command. %s will be replaced by package name."
+  "Package install command.  %s will be replaced by package name."
   :type '(string)
   :group 'arch-pkg)
 
 (defcustom arch-pkg-delete-command "sudo pacman -R %s"
-  "Package delete command. %s will be replaced by package name."
+  "Package delete command.  %s will be replaced by package name."
   :type '(string)
   :group 'arch-pkg)
 
@@ -133,7 +133,7 @@ For debugging."
 
 (defun arch-pkg--format-status (n &optional show-not-installed)
   "Format package status N (an integer).
-When SHOW-NOT-INSTALLED is t, print 'not installed'."
+When SHOW-NOT-INSTALLED is t, print \"not installed\"."
   (if show-not-installed
       (aref ["installed" "dependency" "not installed"] n)
     (aref ["installed" "dependency" ""] n)))
@@ -462,7 +462,7 @@ into a hashmap and return it."
 
 
 (defun arch-pkg--make-button (text &rest properties)
-  "Like `package-make-button'."
+  "Create button with TEXT and PROPERTIES, similar to `package-make-button'."
   (let ((button-text (if (display-graphic-p) text (concat "[" text "]")))
         (button-face (if (display-graphic-p)
                          (progn
@@ -700,7 +700,7 @@ into a hashmap and return it."
           (let ((inhibit-read-only t))
             (erase-buffer)
             (insert-file-contents filename)
-            (beginning-of-buffer)
+            (goto-char (point-min))
             (kill-line 1)               ; kill %FILE%
             (while (not (eobp))
               (let ((line (buffer-substring-no-properties (line-beginning-position)
@@ -713,7 +713,7 @@ into a hashmap and return it."
                  (t
                   (insert "/")
                   (forward-line)))))
-            (beginning-of-buffer))
+            (goto-char (point-min)))
           (text-mode)
           (setq buffer-read-only t)
           (display-buffer buf))))))
