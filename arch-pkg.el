@@ -720,7 +720,7 @@ into a hashmap and return it."
 
 
 (defun arch-pkg-install-package (package)
-  (async-shell-command (format arch-pkg-delete-command package)))
+  (async-shell-command (format arch-pkg-install-command package)))
 
 
 (provide 'arch-pkg)
