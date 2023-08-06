@@ -602,7 +602,7 @@ into a hashmap and return it."
                       (insert ": " (cadr splitted)))
                     (insert "\n" (make-string width ?\s))))
                 (delete-line)
-                (backward-delete-char 1)
+                (delete-char -1)
                 (insert "\n"))
 
               (insert (arch-pkg--propertize (string-pad "Required By: " width ?\s t)))
@@ -679,13 +679,19 @@ into a hashmap and return it."
 
 
 (defun arch-pkg-delete-package (package)
-  (async-shell-command (format arch-pkg-delete-command package)))
+  (async-shell-command (format arch-pkg-delete-command package))
+  (pop-to-buffer shell-command-buffer-name-async))
 
 
 (defun arch-pkg-install-action (button)
   (let ((pkg-name (button-get button 'package-name)))
     (when (y-or-n-p (format-message "Install package `%s'? " pkg-name))
       (arch-pkg-install-package pkg-name))))
+
+
+(defun arch-pkg-install-package (package)
+  (async-shell-command (format arch-pkg-install-command package))
+  (pop-to-buffer shell-command-buffer-name-async))
 
 
 (defun arch-pkg-show-files-action (button)
@@ -717,10 +723,6 @@ into a hashmap and return it."
           (text-mode)
           (setq buffer-read-only t)
           (display-buffer buf))))))
-
-
-(defun arch-pkg-install-package (package)
-  (async-shell-command (format arch-pkg-install-command package)))
 
 
 (provide 'arch-pkg)
