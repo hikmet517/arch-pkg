@@ -405,8 +405,10 @@ into a hashmap and return it."
           ("Repository" 12 t)
           ("Status" 12 t)
           ("Date" 17 t)
-          ("Size" 0 t)])
+          ("Size" 10 t)
+          ("Description" 0 t)])
   (setq tabulated-list-padding 2)
+  (toggle-truncate-lines +1)
   (setq revert-buffer-function 'arch-pkg-refresh))
 
 
@@ -444,7 +446,8 @@ into a hashmap and return it."
                                    (let ((size (gethash "SIZE" pkg)))
                                      (if size
                                          (arch-pkg--format-size size)
-                                       ""))))
+                                       ""))
+                                   (gethash "DESC" pkg)))
                      arch-pkg-list))
              arch-pkg-db)
 
