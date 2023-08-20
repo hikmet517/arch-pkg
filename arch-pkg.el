@@ -152,6 +152,15 @@ When SHOW-NOT-INSTALLED is t, print \"not installed\"."
     (format "%.1f GiB" (/ n 1024.0 1024.0 1024.0)))))
 
 
+(defun arch-pkg--size-predicate (A B)
+  (let ((pkgA (gethash (car A) arch-pkg-db))
+        (pkgB (gethash (car B) arch-pkg-db)))
+    (< (or (gethash "ISIZE" pkgA)
+           (gethash "SIZE" pkgA))
+       (or (gethash "ISIZE" pkgB)
+           (gethash "SIZE" pkgB)))))
+
+
 (defun arch-pkg--parse-depends-str (s)
   "Parse dependecy string S.
 Example: libglib-2.0.so=0-64 returns ('libglib-2.0.so' '=' '0-64')"
@@ -405,7 +414,7 @@ into a hashmap and return it."
           ("Repository" 12 t)
           ("Status" 12 t)
           ("Date" 17 t)
-          ("Size" 10 t)
+          ("Size" 11 arch-pkg--size-predicate)
           ("Description" 0 t)])
   (setq tabulated-list-padding 2)
   (toggle-truncate-lines +1)
@@ -443,10 +452,7 @@ into a hashmap and return it."
                                    (arch-pkg--format-status (gethash "REASON" pkg))
                                    (arch-pkg--format-date
                                     (gethash "INSTALLDATE" pkg))
-                                   (let ((size (gethash "SIZE" pkg)))
-                                     (if size
-                                         (arch-pkg--format-size size)
-                                       ""))
+                                   (arch-pkg--format-size (or (gethash "ISIZE" pkg) (gethash "SIZE" pkg)))
                                    (gethash "DESC" pkg)))
                      arch-pkg-list))
              arch-pkg-db)
