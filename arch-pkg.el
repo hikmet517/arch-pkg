@@ -421,6 +421,23 @@ into a hashmap and return it."
   (setq revert-buffer-function 'arch-pkg-refresh))
 
 
+(define-derived-mode arch-pkg-aur-list-mode tabulated-list-mode "AUR Package List"
+  "Major mode for browsing a list of packages in AUR Search results.
+
+\\{arch-pkg-aur-list-mode}"
+  (visual-line-mode +1)
+  (setq buffer-read-only t)
+  (toggle-truncate-lines +1)
+  (setq tabulated-list-format
+        `[("Name" 36 t)
+          ("Version" 15 t)
+          ("Votes" 12 t)
+          ("Popularity" 12 t)
+          ("Last Updated" 17 t)
+          ("Description" 0 t)])
+  (setq tabulated-list-padding 2))
+
+
 ;;;###autoload
 (defun arch-pkg-refresh (&optional _arg _noconfirm)
   "Re-read database and list packages."
@@ -733,6 +750,50 @@ into a hashmap and return it."
           (setq buffer-read-only t)
           (display-buffer buf))))))
 
+(defun arch-pkg--aur-search-cb (status)
+  (let ((err (plist-get status :error)))
+    (when err
+      (error "Fetch failed")
+      (pp err)))
+
+  (goto-char (point-min))
+  ;; skip mime headers
+  (forward-paragraph)
+
+  (let ((obj (ignore-errors (json-parse-buffer))))
+    (unless obj
+      (error "Json parsing failed"))
+    (let ((aur-list '())
+          (results (gethash "results" obj)))
+
+      (message "IS LIST: %s" (listp results))
+
+      (setq results (sort results (lambda (p1 p2) (< (gethash "NumVotes" p1)
+                                                     (gethash "NumVotes" p2)))))
+      (seq-do (lambda (pkg)
+                (push (list (gethash "Name" pkg)
+                            (vector (gethash "Name" pkg)
+                                    (gethash "Version" pkg)
+                                    (number-to-string (gethash "NumVotes" pkg))
+                                    (number-to-string (gethash "Popularity" pkg))
+                                    (arch-pkg--format-date (gethash "LastModified" pkg))
+                                    (gethash "Description" pkg)))
+                      aur-list))
+              results)
+      (when aur-list
+        (let ((buf (get-buffer-create (format "*AUR Search Results (%d)*"
+                                              (gethash "resultcount" obj)))))
+          (pop-to-buffer-same-window buf)
+          (arch-pkg-aur-list-mode)
+          (setq tabulated-list-entries aur-list)
+          (tabulated-list-init-header)
+          (tabulated-list-print))))))
+
+(defun arch-pkg-aur-search (query)
+  (interactive "sEnter query: ")
+  (let ((url (concat "https://aur.archlinux.org/rpc/?v=5&type=search&arg="
+                     query)))
+    (url-retrieve url #'arch-pkg--aur-search-cb nil t)))
 
 (provide 'arch-pkg)
 ;;; arch-pkg.el ends here
