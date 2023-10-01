@@ -750,7 +750,7 @@ into a hashmap and return it."
           (setq buffer-read-only t)
           (display-buffer buf))))))
 
-(defun arch-pkg--aur-search-cb (status)
+(defun arch-pkg--aur-search-cb (status query)
   (let ((err (plist-get status :error)))
     (when err
       (error "Fetch failed")
@@ -766,22 +766,23 @@ into a hashmap and return it."
     (let ((aur-list '())
           (results (gethash "results" obj)))
 
-      (message "IS LIST: %s" (listp results))
+      (when results
+        (setq results (sort results (lambda (p1 p2) (< (gethash "NumVotes" p1)
+                                                       (gethash "NumVotes" p2)))))
+        (seq-do (lambda (pkg)
+                  (push (list (gethash "Name" pkg)
+                              (vector (gethash "Name" pkg)
+                                      (gethash "Version" pkg)
+                                      (number-to-string (gethash "NumVotes" pkg))
+                                      (number-to-string (gethash "Popularity" pkg))
+                                      (arch-pkg--format-date (gethash "LastModified" pkg))
+                                      (let ((desc (gethash "Description" pkg)))
+                                        (if (eq desc :null) "" desc))))
+                        aur-list))
+                results)
 
-      (setq results (sort results (lambda (p1 p2) (< (gethash "NumVotes" p1)
-                                                     (gethash "NumVotes" p2)))))
-      (seq-do (lambda (pkg)
-                (push (list (gethash "Name" pkg)
-                            (vector (gethash "Name" pkg)
-                                    (gethash "Version" pkg)
-                                    (number-to-string (gethash "NumVotes" pkg))
-                                    (number-to-string (gethash "Popularity" pkg))
-                                    (arch-pkg--format-date (gethash "LastModified" pkg))
-                                    (gethash "Description" pkg)))
-                      aur-list))
-              results)
-      (when aur-list
-        (let ((buf (get-buffer-create (format "*AUR Search Results (%d)*"
+        (let ((buf (get-buffer-create (format "*AUR Search Results: %s (%d)*"
+                                              query
                                               (gethash "resultcount" obj)))))
           (pop-to-buffer-same-window buf)
           (arch-pkg-aur-list-mode)
@@ -793,7 +794,7 @@ into a hashmap and return it."
   (interactive "sEnter query: ")
   (let ((url (concat "https://aur.archlinux.org/rpc/?v=5&type=search&arg="
                      query)))
-    (url-retrieve url #'arch-pkg--aur-search-cb nil t)))
+    (url-retrieve url #'arch-pkg--aur-search-cb (list query) t)))
 
 (provide 'arch-pkg)
 ;;; arch-pkg.el ends here
