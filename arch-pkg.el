@@ -57,9 +57,17 @@
 soname => (package1 package2)
 string => (symbols)")
 
+(defvar arch-pkg-aur-db nil "Database to store the results of the last AUR search")
+
 (defvar arch-pkg-list-mode-map
   (let ((map (make-sparse-keymap)))
     (define-key map [(control ?m)] #'arch-pkg-describe-package)
+    (define-key map "r" #'revert-buffer)
+    map))
+
+(defvar arch-pkg-aur-list-mode-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map [(control ?m)] #'arch-pkg-aur-describe-package)
     (define-key map "r" #'revert-buffer)
     map))
 
@@ -750,6 +758,114 @@ into a hashmap and return it."
           (setq buffer-read-only t)
           (display-buffer buf))))))
 
+(defun arch-pkg--aur-info-cb (status package)
+  (let ((err (plist-get status :error)))
+    (when err
+      (error "Fetch failed")
+      (pp err)))
+
+  (goto-char (point-min))
+  ;; skip mime headers
+  (forward-paragraph)
+
+  (let ((obj (ignore-errors (json-parse-buffer))))
+    (unless obj
+      (error "Json parsing failed"))
+    (when (string= (gethash "type" obj)
+                   "error")
+      (error "Query returned error"))
+    (let ((aur-list '())
+          (results (gethash "results" obj)))
+      (unless results
+        (error "Json does not contain 'results' key"))
+      (unless (equal (length results) 1)
+        (error "No results or multiple results"))
+
+      (when-let ((pkg (aref results 0)))
+        (help-setup-xref (list #'arch-pkg-aur-describe-package package)
+                         (called-interactively-p 'interactive))
+        (with-help-window (help-buffer)
+          (with-current-buffer standard-output
+            (let ((inhibit-read-only t)
+                  (width 22))
+              (erase-buffer)
+              (setq buffer-file-coding-system 'utf-8)
+
+              (insert (arch-pkg--propertize (string-pad "Name: " width ?\s t)))
+              (insert (gethash "Name" pkg) "\n")
+
+              (insert (arch-pkg--propertize (string-pad "Version: " width ?\s t)))
+              (insert (gethash "Version" pkg) "\n")
+
+              (insert (arch-pkg--propertize (string-pad "Description: " width ?\s t)))
+              (insert (gethash "Description" pkg) "\n")
+
+              (insert (arch-pkg--propertize (string-pad "Url: " width ?\s t)))
+              (let ((url (gethash "URL" pkg)))
+                (help-insert-xref-button url 'help-url url))
+              (insert "\n")
+
+              (insert (arch-pkg--propertize (string-pad "AUR Url: " width ?\s t)))
+              (let ((url (concat "https://aur.archlinux.org/packages/"
+                                 (gethash "Name" pkg))))
+                (help-insert-xref-button url 'help-url url))
+              (insert "\n")
+
+              (insert (arch-pkg--propertize (string-pad "Licenses: " width ?\s t)))
+              (insert (string-join (gethash "License" pkg) ", ") "\n")
+
+              (insert (arch-pkg--propertize (string-pad "Dependencies: " width ?\s t)))
+              (if-let ((deps (gethash "Depends" pkg)))
+                  (unless arch-pkg-db
+                    (arch-pkg--create-db))
+                  (seq-do
+                   (lambda (dep)
+                     (let ((p (gethash (intern (arch-pkg--extract-package-name dep)) arch-pkg-db)))
+                       (if (and p (< (gethash "REASON" p) 2))
+                           (help-insert-xref-button dep 'help-arch-package-installed dep)
+                         (help-insert-xref-button dep 'help-arch-package dep)))
+                     (insert " "))
+                   deps)
+                (insert "None"))
+              (insert "\n")
+
+              (insert (arch-pkg--propertize (string-pad "Build Dependencies: " width ?\s t)))
+              (if-let ((deps (gethash "MakeDepends" pkg)))
+                  (seq-do
+                   (lambda (dep)
+                     (let ((p (gethash (intern (arch-pkg--extract-package-name dep)) arch-pkg-db)))
+                       (if (and p (< (gethash "REASON" p) 2))
+                           (help-insert-xref-button dep 'help-arch-package-installed dep)
+                         (help-insert-xref-button dep 'help-arch-package dep)))
+                     (insert " "))
+                   deps)
+                (insert "None"))
+              (insert "\n")
+
+              (insert (arch-pkg--propertize (string-pad "Number of Votes: " width ?\s t)))
+              (insert (number-to-string (gethash "NumVotes" pkg)) "\n")
+
+              (insert (arch-pkg--propertize (string-pad "First Submitted: " width ?\s t)))
+              (insert (arch-pkg--format-date (gethash "FirstSubmitted" pkg)) "\n")
+
+              (insert (arch-pkg--propertize (string-pad "Last Updated: " width ?\s t)))
+              (insert (arch-pkg--format-date (gethash "LastModified" pkg)) "\n")
+
+              (insert (arch-pkg--propertize (string-pad "Maintainer: " width ?\s t)))
+              (insert (gethash "Maintainer" pkg) "\n"))))))))
+
+(defun arch-pkg-aur-describe-package (&optional package)
+  "Describe AUR PACKAGE (string) details."
+  (interactive)
+  (when (null package)
+    (if (eq major-mode 'arch-pkg-aur-list-mode)
+        (setq package (tabulated-list-get-id))
+      (error "Package name needed")))
+
+  (let ((url (concat "https://aur.archlinux.org/rpc/?v=5&type=info&arg="
+                     package)))
+    (url-retrieve url #'arch-pkg--aur-info-cb (list package) t)))
+
 (defun arch-pkg--aur-search-cb (status query)
   (let ((err (plist-get status :error)))
     (when err
@@ -763,32 +879,43 @@ into a hashmap and return it."
   (let ((obj (ignore-errors (json-parse-buffer))))
     (unless obj
       (error "Json parsing failed"))
+
+    (when (string= (gethash "type" obj)
+                   "error")
+      (error "Query returned error"))
+
     (let ((aur-list '())
           (results (gethash "results" obj)))
 
-      (when results
-        (setq results (sort results (lambda (p1 p2) (< (gethash "NumVotes" p1)
-                                                       (gethash "NumVotes" p2)))))
-        (seq-do (lambda (pkg)
-                  (push (list (gethash "Name" pkg)
-                              (vector (gethash "Name" pkg)
-                                      (gethash "Version" pkg)
-                                      (number-to-string (gethash "NumVotes" pkg))
-                                      (number-to-string (gethash "Popularity" pkg))
-                                      (arch-pkg--format-date (gethash "LastModified" pkg))
-                                      (let ((desc (gethash "Description" pkg)))
-                                        (if (eq desc :null) "" desc))))
-                        aur-list))
-                results)
+      (unless results
+        (error "Json does not contain 'results' key"))
 
-        (let ((buf (get-buffer-create (format "*AUR Search Results: %s (%d)*"
-                                              query
-                                              (gethash "resultcount" obj)))))
-          (pop-to-buffer-same-window buf)
-          (arch-pkg-aur-list-mode)
-          (setq tabulated-list-entries aur-list)
-          (tabulated-list-init-header)
-          (tabulated-list-print))))))
+      (setq arch-pkg-aur-db (sort results (lambda (p1 p2) (< (gethash "NumVotes" p1)
+                                                             (gethash "NumVotes" p2)))))
+      (seq-do (lambda (pkg)
+                (push (list (gethash "Name" pkg)
+                            (vector (cons (gethash "Name" pkg)
+                                          (list
+                                           'action
+                                           (lambda (but)
+                                             (arch-pkg-aur-describe-package (button-label but)))))
+                                    (gethash "Version" pkg)
+                                    (number-to-string (gethash "NumVotes" pkg))
+                                    (number-to-string (gethash "Popularity" pkg))
+                                    (arch-pkg--format-date (gethash "LastModified" pkg))
+                                    (let ((desc (gethash "Description" pkg)))
+                                      (if (eq desc :null) "" desc))))
+                      aur-list))
+              arch-pkg-aur-db)
+
+      (let ((buf (get-buffer-create (format "*AUR Search Results: %s (%d)*"
+                                            query
+                                            (gethash "resultcount" obj)))))
+        (pop-to-buffer-same-window buf)
+        (arch-pkg-aur-list-mode)
+        (setq tabulated-list-entries aur-list)
+        (tabulated-list-init-header)
+        (tabulated-list-print)))))
 
 (defun arch-pkg-aur-search (query)
   (interactive "sEnter query: ")
