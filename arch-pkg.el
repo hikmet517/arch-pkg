@@ -774,8 +774,7 @@ into a hashmap and return it."
     (when (string= (gethash "type" obj)
                    "error")
       (error "Query returned error"))
-    (let ((aur-list '())
-          (results (gethash "results" obj)))
+    (let ((results (gethash "results" obj)))
       (unless results
         (error "Json does not contain 'results' key"))
       (unless (equal (length results) 1)
@@ -917,6 +916,7 @@ into a hashmap and return it."
         (tabulated-list-init-header)
         (tabulated-list-print)))))
 
+;;;###autoload
 (defun arch-pkg-aur-search (query)
   (interactive "sEnter query: ")
   (let ((url (concat "https://aur.archlinux.org/rpc/?v=5&type=search&arg="
