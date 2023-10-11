@@ -475,10 +475,9 @@ into a hashmap and return it."
                                    (gethash "VERSION" pkg)
                                    (or (gethash "REPOSITORY" pkg) "")
                                    (arch-pkg--format-status (gethash "REASON" pkg))
-                                   (arch-pkg--format-date
-                                    (gethash "INSTALLDATE" pkg))
+                                   (arch-pkg--format-date (gethash "INSTALLDATE" pkg))
                                    (arch-pkg--format-size (or (gethash "ISIZE" pkg) (gethash "SIZE" pkg)))
-                                   (gethash "DESC" pkg)))
+                                   (gethash "DESC" pkg "")))
                      arch-pkg-list))
              arch-pkg-db)
 
@@ -562,7 +561,7 @@ into a hashmap and return it."
               (insert (gethash "VERSION" pkg) "\n")
 
               (insert (arch-pkg--propertize (string-pad "Description: " width ?\s t)))
-              (insert (gethash "DESC" pkg) "\n")
+              (insert (gethash "DESC" pkg "") "\n")
 
               (insert (arch-pkg--propertize (string-pad "Url: " width ?\s t)))
               (let ((url (gethash "URL" pkg)))
