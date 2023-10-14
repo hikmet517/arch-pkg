@@ -446,10 +446,8 @@ into a hashmap and return it."
   (setq tabulated-list-padding 2))
 
 
-;;;###autoload
 (defun arch-pkg-refresh (&optional _arg _noconfirm)
   "Re-read database and list packages."
-  (interactive)
   (arch-pkg--create-db)
   (arch-pkg-list-packages))
 
@@ -757,6 +755,7 @@ into a hashmap and return it."
           (setq buffer-read-only t)
           (display-buffer buf))))))
 
+
 (defun arch-pkg--aur-info-cb (status package)
   (let ((err (plist-get status :error)))
     (when err
@@ -852,9 +851,14 @@ into a hashmap and return it."
               (insert (arch-pkg--propertize (string-pad "Maintainer: " width ?\s t)))
               (insert (gethash "Maintainer" pkg) "\n"))))))))
 
+
+;;;###autoload
 (defun arch-pkg-aur-describe-package (&optional package)
   "Describe AUR PACKAGE (string) details."
-  (interactive)
+  (interactive
+   (list (unless (eq major-mode 'arch-pkg-aur-list-mode)
+           (read-from-minibuffer "Package Name: "))))
+
   (when (null package)
     (if (eq major-mode 'arch-pkg-aur-list-mode)
         (setq package (tabulated-list-get-id))
@@ -863,6 +867,7 @@ into a hashmap and return it."
   (let ((url (concat "https://aur.archlinux.org/rpc/?v=5&type=info&arg="
                      package)))
     (url-retrieve url #'arch-pkg--aur-info-cb (list package) t)))
+
 
 (defun arch-pkg--aur-search-cb (status query)
   (let ((err (plist-get status :error)))
@@ -914,6 +919,7 @@ into a hashmap and return it."
         (setq tabulated-list-entries aur-list)
         (tabulated-list-init-header)
         (tabulated-list-print)))))
+
 
 ;;;###autoload
 (defun arch-pkg-aur-search (query)
