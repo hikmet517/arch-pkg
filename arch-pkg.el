@@ -813,29 +813,33 @@ into a hashmap and return it."
 
               (insert (arch-pkg--propertize (string-pad "Dependencies: " width ?\s t)))
               (if-let ((deps (gethash "Depends" pkg)))
-                  (unless arch-pkg-db
-                    (arch-pkg--create-db))
-                  (seq-do
-                   (lambda (dep)
-                     (let ((p (gethash (intern (arch-pkg--extract-package-name dep)) arch-pkg-db)))
-                       (if (and p (< (gethash "REASON" p) 2))
-                           (help-insert-xref-button dep 'help-arch-package-installed dep)
-                         (help-insert-xref-button dep 'help-arch-package dep)))
-                     (insert " "))
-                   deps)
+                  (progn
+                    (unless arch-pkg-db
+                      (arch-pkg--create-db))
+                    (seq-do
+                     (lambda (dep)
+                       (let ((p (gethash (intern (arch-pkg--extract-package-name dep)) arch-pkg-db)))
+                         (if (and p (< (gethash "REASON" p) 2))
+                             (help-insert-xref-button dep 'help-arch-package-installed dep)
+                           (help-insert-xref-button dep 'help-arch-package dep)))
+                       (insert " "))
+                     deps))
                 (insert "None"))
               (insert "\n")
 
               (insert (arch-pkg--propertize (string-pad "Build Dependencies: " width ?\s t)))
               (if-let ((deps (gethash "MakeDepends" pkg)))
-                  (seq-do
-                   (lambda (dep)
-                     (let ((p (gethash (intern (arch-pkg--extract-package-name dep)) arch-pkg-db)))
-                       (if (and p (< (gethash "REASON" p) 2))
-                           (help-insert-xref-button dep 'help-arch-package-installed dep)
-                         (help-insert-xref-button dep 'help-arch-package dep)))
-                     (insert " "))
-                   deps)
+                  (progn
+                    (unless arch-pkg-db
+                      (arch-pkg--create-db))
+                    (seq-do
+                     (lambda (dep)
+                       (let ((p (gethash (intern (arch-pkg--extract-package-name dep)) arch-pkg-db)))
+                         (if (and p (< (gethash "REASON" p) 2))
+                             (help-insert-xref-button dep 'help-arch-package-installed dep)
+                           (help-insert-xref-button dep 'help-arch-package dep)))
+                       (insert " "))
+                     deps))
                 (insert "None"))
               (insert "\n")
 
