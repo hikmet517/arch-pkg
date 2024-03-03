@@ -82,6 +82,27 @@ string => (symbols)")
   'help-echo (purecopy "mouse-2, RET: Describe package")
   'face '(:inherit font-lock-type-face :underline t))
 
+(defvar arch-pkg-file-list-mode-map
+  (let ((map (make-sparse-keymap)))
+    ;; (define-key map "g" nil)
+    (define-key map "b" 'arch-pkg--find-file-other-window-background)
+    (define-key map [(control ?m)] 'arch-pkg--find-file)
+    (define-key map [mouse-1] 'arch-pkg--find-file)
+    map))
+
+(define-derived-mode arch-pkg-file-list-mode special-mode "arch-pkg file-list mode"
+  "Major mode used in arch-pkg when displaying list of files of packages.
+
+\\{arch-pkg-file-list-mode-map}"
+  (let ((inhibit-read-only t))
+    (while (not (eobp))
+      (add-text-properties
+       (line-beginning-position)
+       (line-end-position)
+       '(mouse-face highlight help-echo "mouse-1: visit this file"))
+      (forward-line)))
+  (setq buffer-read-only t))
+
 
 ;;;; User options
 
@@ -751,10 +772,30 @@ into a hashmap and return it."
                   (insert "/")
                   (forward-line)))))
             (goto-char (point-min)))
-          (text-mode)
-          (setq buffer-read-only t)
+          (arch-pkg-file-list-mode)
           (display-buffer buf))))))
 
+
+(defun arch-pkg--find-file ()
+  (interactive)
+  (let ((filename (buffer-substring-no-properties
+                   (line-beginning-position)
+                   (line-end-position))))
+    (find-file filename)))
+
+(defun arch-pkg--find-file-other-window-background ()
+  (interactive)
+  (let* ((filename (buffer-substring-no-properties
+                    (line-beginning-position)
+                    (line-end-position)))
+         (value (find-file-noselect filename)))
+    (if (listp value)
+        (progn
+          (setq value (nreverse value))
+          (display-buffer (car value))
+          (mapc 'display-buffer (cdr value))
+          value)
+      (display-buffer value))))
 
 (defun arch-pkg--aur-info-cb (status package)
   (let ((err (plist-get status :error)))
