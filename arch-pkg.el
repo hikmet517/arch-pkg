@@ -95,12 +95,14 @@ string => (symbols)")
 
 \\{arch-pkg-file-list-mode-map}"
   (let ((inhibit-read-only t))
+    (goto-char (point-min))
     (while (not (eobp))
       (add-text-properties
        (line-beginning-position)
        (line-end-position)
        '(mouse-face highlight help-echo "mouse-1: visit this file"))
-      (forward-line)))
+      (forward-line))
+    (goto-char (point-min)))
   (setq buffer-read-only t))
 
 
