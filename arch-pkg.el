@@ -897,7 +897,10 @@ into a hashmap and return it."
               (insert (arch-pkg--format-date (gethash "LastModified" pkg)) "\n")
 
               (insert (arch-pkg--propertize (string-pad "Maintainer: " width ?\s t)))
-              (insert (gethash "Maintainer" pkg) "\n"))))))))
+              (let ((maintainer (gethash "Maintainer" pkg)))
+                (if (eq maintainer :null)
+                    (insert "None")
+                  (insert (gethash "Maintainer" pkg) "\n"))))))))))
 
 
 ;;;###autoload
