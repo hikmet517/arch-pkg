@@ -784,7 +784,8 @@ into a hashmap and return it."
   (let ((filename (buffer-substring-no-properties
                    (line-beginning-position)
                    (line-end-position))))
-    (find-file filename)))
+    (unless (or (string-empty-p filename) (eolp))
+      (find-file filename))))
 
 (defun arch-pkg--find-file-other-window-background ()
   (interactive)
