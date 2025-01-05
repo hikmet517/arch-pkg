@@ -61,13 +61,13 @@ string => (symbols)")
 
 (defvar arch-pkg-list-mode-map
   (let ((map (make-sparse-keymap)))
-    (define-key map [(control ?m)] #'arch-pkg-describe-package)
+    (define-key map [(control ?m)] #'arch-pkg-list-describe-package)
     (define-key map "r" #'revert-buffer)
     map))
 
 (defvar arch-pkg-aur-list-mode-map
   (let ((map (make-sparse-keymap)))
-    (define-key map [(control ?m)] #'arch-pkg-aur-describe-package)
+    (define-key map [(control ?m)] #'arch-pkg-aur-list-describe-package)
     (define-key map "r" #'revert-buffer)
     map))
 
@@ -386,7 +386,7 @@ into a hashmap and return it."
     ;; create additional fields: REQUIREDBY, OPTIONALFOR
     (maphash (lambda (name pkg)
                ;; create REQUIREDBY from DEPENDS
-               (when-let ((deps (gethash "DEPENDS" pkg)))
+               (when-let* ((deps (gethash "DEPENDS" pkg)))
                  (dolist (dep deps)
                    (let* ((depname (intern (arch-pkg--extract-package-name dep)))
                           (deppkg (gethash depname arch-pkg-db)))
@@ -404,7 +404,7 @@ into a hashmap and return it."
 
 
                ;; create OPTIONALFOR from OPTDEPENDS
-               (when-let ((deps (gethash "OPTDEPENDS" pkg)))
+               (when-let* ((deps (gethash "OPTDEPENDS" pkg)))
                  (dolist (dep deps)
                    (let* ((depname (intern (arch-pkg--extract-package-name dep)))
                           (deppkg (gethash depname arch-pkg-db)))
@@ -422,11 +422,11 @@ into a hashmap and return it."
              arch-pkg-db)
 
     (maphash (lambda (_name pkg)
-               (when-let ((reqs (gethash "REQUIREDBY" pkg)))
+               (when-let* ((reqs (gethash "REQUIREDBY" pkg)))
                  (puthash "REQUIREDBY"
                           (sort reqs (lambda (s1 s2) (string< (symbol-name s1) (symbol-name s2))))
                           pkg))
-               (when-let ((opts (gethash "OPTIONALFOR" pkg)))
+               (when-let* ((opts (gethash "OPTIONALFOR" pkg)))
                  (puthash "OPTIONALFOR"
                           (sort opts (lambda (s1 s2) (string< (symbol-name s1) (symbol-name s2))))
                           pkg)))
@@ -528,22 +528,25 @@ into a hashmap and return it."
            properties)))
 
 
+(defun arch-pkg-list-describe-package (&optional button)
+  (interactive nil arch-pkg-list-mode)
+  (let ((pkg-name (if button (button-get button 'package-name)
+                    (tabulated-list-get-id))))
+    (if pkg-name
+        (arch-pkg-describe-package pkg-name)
+      (user-error "No package here"))))
+
+
 ;;;###autoload
 (defun arch-pkg-describe-package (&optional package)
   "Display the full documentation of Archlinux package PACKAGE (string or symbol)."
-  (interactive
-   (list
-    (progn
-      (unless arch-pkg-db
-        (arch-pkg--create-db))
-      (unless (eq major-mode 'arch-pkg-list-mode)
-        (completing-read "Describe Arch Package: "
-                         (hash-table-keys arch-pkg-db))))))
+  (interactive)
 
-  (when (null package)
-    (if (eq major-mode 'arch-pkg-list-mode)
-        (setq package (tabulated-list-get-id))
-      (error "Package name needed")))
+  (unless package
+    (unless arch-pkg-db
+      (arch-pkg--create-db))
+    (setq package (completing-read "Describe Arch Package: "
+                                   (hash-table-keys arch-pkg-db))))
 
   (setq package (intern (arch-pkg--extract-package-name
                          (if (stringp package)
@@ -554,15 +557,15 @@ into a hashmap and return it."
 
     (when (not pkg)
       ;; not found, this may be a feature provided by some other packages
-      (when-let ((pkgs (gethash (symbol-name package) arch-pkg-providedby)))
+      (when-let* ((pkgs (gethash (symbol-name package) arch-pkg-providedby)))
         (if (cadr pkgs)
-            ;; multiple choises, ask user
+            ;; multiple choices, ask user
             (setq package (intern (completing-read (format "%s is provided by multiple packages: "
                                                            (symbol-name package))
                                                    (mapcar #'symbol-name pkgs)
                                                    nil
                                                    t)))
-          ;; only one choise
+          ;; only one choice
           (setq package (car pkgs)))
         (setq pkg (gethash package arch-pkg-db))))
 
@@ -623,11 +626,11 @@ into a hashmap and return it."
               (insert (arch-pkg--propertize (string-pad "Repository: " width ?\s t)))
               (insert (gethash "REPOSITORY" pkg "") "\n")
 
-              (when-let ((grp (gethash "GROUPS" pkg)))
+              (when-let* ((grp (gethash "GROUPS" pkg)))
                 (insert (arch-pkg--propertize (string-pad "Groups: " width ?\s t)))
                 (insert (string-join grp " ") "\n"))
 
-              (when-let ((prs (gethash "PROVIDES" pkg)))
+              (when-let* ((prs (gethash "PROVIDES" pkg)))
                 (insert (arch-pkg--propertize (string-pad "Provides: " width ?\s t)))
                 (dolist (pr prs)
                   (help-insert-xref-button pr 'help-arch-package pr)
@@ -635,7 +638,7 @@ into a hashmap and return it."
                 (insert "\n"))
 
               (insert (arch-pkg--propertize (string-pad "Dependencies: " width ?\s t)))
-              (if-let ((deps (gethash "DEPENDS" pkg)))
+              (if-let* ((deps (gethash "DEPENDS" pkg)))
                   (dolist (dep deps)
                     (let ((p (gethash (intern (arch-pkg--extract-package-name dep)) arch-pkg-db)))
                       (if (and p (< (gethash "REASON" p) 2))
@@ -645,7 +648,7 @@ into a hashmap and return it."
                 (insert "None"))
               (insert "\n")
 
-              (when-let ((opts (gethash "OPTDEPENDS" pkg)))
+              (when-let* ((opts (gethash "OPTDEPENDS" pkg)))
                 (insert (arch-pkg--propertize (string-pad "Optional: " width ?\s t)))
                 (dolist (opt opts)
                   (let ((splitted (split-string opt ": ")))
@@ -661,7 +664,7 @@ into a hashmap and return it."
                 (insert "\n"))
 
               (insert (arch-pkg--propertize (string-pad "Required By: " width ?\s t)))
-              (if-let ((reqs (gethash "REQUIREDBY" pkg)))
+              (if-let* ((reqs (gethash "REQUIREDBY" pkg)))
                   (dolist (req reqs)
                     (let ((p (gethash (intern (arch-pkg--extract-package-name (symbol-name req))) arch-pkg-db)))
                       (if (and p (< (gethash "REASON" p) 2))
@@ -671,7 +674,7 @@ into a hashmap and return it."
                 (insert "None"))
               (insert "\n")
 
-              (when-let ((opts (gethash "OPTIONALFOR" pkg)))
+              (when-let* ((opts (gethash "OPTIONALFOR" pkg)))
                 (insert (arch-pkg--propertize (string-pad "Optional for: " width ?\s t)))
                 (dolist (opt opts)
                   (let ((p (gethash (intern (arch-pkg--extract-package-name (symbol-name opt))) arch-pkg-db)))
@@ -681,7 +684,7 @@ into a hashmap and return it."
                   (insert " "))
                 (insert "\n"))
 
-              (when-let ((cnf (gethash "CONFLICTS" pkg)))
+              (when-let* ((cnf (gethash "CONFLICTS" pkg)))
                 (insert (arch-pkg--propertize (string-pad "Conflicts with: " width ?\s t)))
                 (dolist (c (split-string cnf "\n"))
                   (let ((p (gethash (intern (arch-pkg--extract-package-name c)) arch-pkg-db)))
@@ -700,19 +703,19 @@ into a hashmap and return it."
               (insert (arch-pkg--propertize (string-pad "Build Date: " width ?\s t)))
               (insert (arch-pkg--format-date (gethash "BUILDDATE" pkg)) "\n")
 
-              (when-let ((idate (gethash "INSTALLDATE" pkg)))
+              (when-let* ((idate (gethash "INSTALLDATE" pkg)))
                 (insert (arch-pkg--propertize (string-pad "Install Date: " width ?\s t)))
                 (insert (arch-pkg--format-date idate) "\n"))
 
-              (when-let ((isize (or (gethash "SIZE" pkg) (gethash "ISIZE" pkg))))
+              (when-let* ((isize (or (gethash "SIZE" pkg) (gethash "ISIZE" pkg))))
                 (insert (arch-pkg--propertize (string-pad "Install Size: " width ?\s t)))
                 (insert (arch-pkg--format-size isize) "\n"))
 
-              (when-let ((csize (gethash "CSIZE" pkg)))
+              (when-let* ((csize (gethash "CSIZE" pkg)))
                 (insert (arch-pkg--propertize (string-pad "Download Size: " width ?\s t)))
                 (insert (arch-pkg--format-size csize) "\n"))
 
-              (when-let ((val (gethash "VALIDATION" pkg)))
+              (when-let* ((val (gethash "VALIDATION" pkg)))
                 (insert (arch-pkg--propertize (string-pad "Validation: " width ?\s t)))
                 (insert val "\n"))
 
@@ -823,7 +826,7 @@ into a hashmap and return it."
       (unless (equal (length results) 1)
         (error "No results or multiple results"))
 
-      (when-let ((pkg (aref results 0)))
+      (when-let* ((pkg (aref results 0)))
         (help-setup-xref (list #'arch-pkg-aur-describe-package package)
                          (called-interactively-p 'interactive))
         (with-help-window (help-buffer)
@@ -857,7 +860,7 @@ into a hashmap and return it."
               (insert (string-join (gethash "License" pkg) ", ") "\n")
 
               (insert (arch-pkg--propertize (string-pad "Dependencies: " width ?\s t)))
-              (if-let ((deps (gethash "Depends" pkg)))
+              (if-let* ((deps (gethash "Depends" pkg)))
                   (progn
                     (unless arch-pkg-db
                       (arch-pkg--create-db))
@@ -873,7 +876,7 @@ into a hashmap and return it."
               (insert "\n")
 
               (insert (arch-pkg--propertize (string-pad "Build Dependencies: " width ?\s t)))
-              (if-let ((deps (gethash "MakeDepends" pkg)))
+              (if-let* ((deps (gethash "MakeDepends" pkg)))
                   (progn
                     (unless arch-pkg-db
                       (arch-pkg--create-db))
@@ -904,17 +907,22 @@ into a hashmap and return it."
                   (insert (gethash "Maintainer" pkg) "\n"))))))))))
 
 
+(defun arch-pkg-aur-list-describe-package (&optional button)
+  (interactive nil arch-pkg-aur-list-mode)
+  (let ((pkg-name (if button (button-get button 'package-name)
+                    (tabulated-list-get-id))))
+    (if pkg-name
+        (arch-pkg-aur-describe-package pkg-name)
+      (user-error "No package here"))))
+
+
 ;;;###autoload
 (defun arch-pkg-aur-describe-package (&optional package)
   "Describe AUR PACKAGE (string) details."
-  (interactive
-   (list (unless (eq major-mode 'arch-pkg-aur-list-mode)
-           (read-from-minibuffer "Package Name: "))))
+  (interactive)
 
-  (when (null package)
-    (if (eq major-mode 'arch-pkg-aur-list-mode)
-        (setq package (tabulated-list-get-id))
-      (error "Package name needed")))
+  (unless package
+    (setq package (read-from-minibuffer "Package Name: ")))
 
   (let ((url (concat "https://aur.archlinux.org/rpc/?v=5&type=info&arg="
                      package)))
