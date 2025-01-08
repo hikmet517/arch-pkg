@@ -59,17 +59,17 @@ string => (symbols)")
 
 (defvar arch-pkg-aur-db nil "Database to store the results of the last AUR search")
 
-(defvar arch-pkg-list-mode-map
-  (let ((map (make-sparse-keymap)))
-    (define-key map [(control ?m)] #'arch-pkg-list-describe-package)
-    (define-key map "r" #'revert-buffer)
-    map))
+(defvar-keymap arch-pkg-list-mode-map
+  :doc "Local keymap for `arch-pkg-list-mode' buffers."
+  :parent tabulated-list-mode-map
+  "C-m"  #'arch-pkg-list-describe-package
+  "r"    #'revert-buffer)
 
-(defvar arch-pkg-aur-list-mode-map
-  (let ((map (make-sparse-keymap)))
-    (define-key map [(control ?m)] #'arch-pkg-aur-list-describe-package)
-    (define-key map "r" #'revert-buffer)
-    map))
+(defvar-keymap arch-pkg-aur-list-mode-map
+  :doc "Local keymap for `arch-pkg-aur-list-mode' buffers."
+  :parent tabulated-list-mode-map
+  "C-m"  #'arch-pkg-aur-list-describe-package
+  "r"    #'revert-buffer)
 
 (define-button-type 'help-arch-package
   :supertype 'help-xref
@@ -82,13 +82,11 @@ string => (symbols)")
   'help-echo (purecopy "mouse-2, RET: Describe package")
   'face '(:inherit font-lock-type-face :underline t))
 
-(defvar arch-pkg-file-list-mode-map
-  (let ((map (make-sparse-keymap)))
-    ;; (define-key map "g" nil)
-    (define-key map "b" 'arch-pkg--find-file-other-window-background)
-    (define-key map [(control ?m)] 'arch-pkg--find-file)
-    (define-key map [mouse-1] 'arch-pkg--find-file)
-    map))
+(defvar-keymap arch-pkg-file-list-mode-map
+  :doc "Local keymap for `arch-pkg-file-list-mode' buffers."
+  "C-m"        #'arch-pkg--find-file-other-window-background
+  "r"          #'arch-pkg--find-file
+  "<mouse-1>"  #'arch-pkg--find-file)
 
 (define-derived-mode arch-pkg-file-list-mode special-mode "arch-pkg file-list mode"
   "Major mode used in arch-pkg when displaying list of files of packages.
