@@ -447,7 +447,9 @@ into a hashmap and return it."
           ("Size" 11 arch-pkg--size-predicate)
           ("Description" 0 t)])
   (setq tabulated-list-padding 2)
-  (toggle-truncate-lines +1)
+  (tabulated-list-init-header)
+  (let ((inhibit-message t))
+    (toggle-truncate-lines +1))
   (setq revert-buffer-function 'arch-pkg-refresh))
 
 
@@ -474,17 +476,15 @@ into a hashmap and return it."
   (arch-pkg-list-packages))
 
 
-;;;###autoload
-(defun arch-pkg-list-packages ()
-  "Display a list of Archlinux packages."
-  (interactive)
+(defun arch-pkg-list--refresh ()
+  "Re-populate the `tabulated-list-entries'."
 
-  ;; read merge sync and local data and merge them into db
+  ;; read sync and local data and merge them into db
   (unless arch-pkg-db
     (arch-pkg--create-db))
 
   ;; create list for tabulated-list-entries
-  (let ((arch-pkg-list nil))
+  (let ((package-list nil))
     (maphash (lambda (name pkg)
                (push (list name
                            (vector (cons (gethash "NAME" pkg)
@@ -498,21 +498,121 @@ into a hashmap and return it."
                                    (arch-pkg--format-date (gethash "INSTALLDATE" pkg))
                                    (arch-pkg--format-size (or (gethash "ISIZE" pkg) (gethash "SIZE" pkg)))
                                    (gethash "DESC" pkg "")))
-                     arch-pkg-list))
+                     package-list))
              arch-pkg-db)
 
     ;; sort by package name
-    (setq arch-pkg-list (sort arch-pkg-list (lambda (s1 s2) (string< (car s1)
-                                                                     (car s2)))))
+    (setq package-list (sort package-list (lambda (s1 s2) (string< (car s1)
+                                                                   (car s2)))))
+    ;; set tabulated-list
+    (setq tabulated-list-entries package-list)))
 
-    ;; create buffer and display
-    (let ((buf (get-buffer-create "*Arch Packages*")))
-      (pop-to-buffer-same-window buf)
-      (arch-pkg-list-mode)
-      (setq tabulated-list-entries arch-pkg-list)
-      (tabulated-list-init-header)
-      (tabulated-list-print))))
+(defun arch-pkg-list--display (suffix)
+  "Display the Arch Package List.
+If SUFFIX is non-nil, append that to \"Package\" for the first
+column in the header line."
+  (setf (car (aref tabulated-list-format 0))
+        (if suffix
+            (concat "Package[" suffix "]")
+          "Package"))
+  (tabulated-list-init-header)
+  (tabulated-list-print t))
 
+;;;###autoload
+(defun arch-pkg-list-packages ()
+  "Display a list of Archlinux packages."
+  (interactive)
+
+  ;; read sync and local data and merge them into db
+  (unless arch-pkg-db
+    (arch-pkg--create-db))
+
+  ;; create buffer and display
+  (let ((buf (get-buffer-create "*Arch Packages*")))
+    (pop-to-buffer-same-window buf)
+    (arch-pkg-list-mode)
+    (arch-pkg-list--refresh)
+    (arch-pkg-list--display nil)))
+
+(defun arch-pkg--ensure-pkg-list-mode ()
+  "Signal a user-error if major mode is not `arch-pkg-list-mode'."
+  (unless (derived-mode-p 'arch-pkg-list-mode)
+    (user-error "The current buffer's mode is not Arch Package List Mode")))
+
+(defun arch-pkg-list--filter-by (predicate suffix)
+  "Filter \"*Arch Packages*\" buffer by PREDICATE.
+PREDICATE is a function which will be called with one argument, a
+`pkg' hash-table, and returns t if that object should be
+listed in the Package Menu."
+  (arch-pkg-list--refresh)
+  (let ((found-entries '()))
+    (dolist (entry tabulated-list-entries)
+      (when (funcall predicate (gethash (car entry) arch-pkg-db))
+        (push entry found-entries)))
+    (if found-entries
+        (progn
+          (setq tabulated-list-entries (reverse found-entries))
+          (arch-pkg-list--display suffix))
+      (user-error "No packages found"))))
+
+(defun arch-pkg-list-filter-by-name (name)
+  "Filter the \"*Arch Packages*\" buffer by the regexp NAME.
+Display only packages whose name matches the regexp NAME.
+
+When called interactively, prompt for NAME.
+
+If NAME is nil or the empty string, show all packages."
+  (interactive (list (read-regexp "Filter by name (regexp)"))
+               arch-pkg-list-mode)
+  (arch-pkg--ensure-pkg-list-mode)
+  (when (and name (not (string-empty-p name)))
+    (arch-pkg-list--filter-by (lambda (pkg)
+                                (string-match-p name (gethash "NAME" pkg)))
+                              (format "name:%s" name))))
+
+(defun arch-pkg-list-filter-by-description (description)
+  "Filter the \"*Arch Packages*\" buffer by the regexp DESCRIPTION.
+Display only packages whose description matches the regexp
+given as DESCRIPTION.
+
+When called interactively, prompt for DESCRIPTION."
+  (interactive (list (read-regexp "Filter by description (regexp)"))
+               arch-pkg-list-mode)
+  (arch-pkg--ensure-pkg-list-mode)
+  (when (and description (not (string-empty-p description)))
+    (arch-pkg-list--filter-by (lambda (pkg)
+                                (string-match-p description
+                                                (gethash "DESC" pkg)))
+                              (format "desc:%s" description))))
+
+(defun arch-pkg-list-filter-by-repo (repo)
+  "Filter the \"*Arch Packages*\" buffer by the REPO name.
+Display only packages whose repo matches the REPO.
+
+When called interactively, prompt for REPO."
+  (interactive (list (completing-read-multiple
+                      "Filter by repository (comma separated): "
+                      (let ((repos '()))
+                        (maphash (lambda (name pkg)
+                                   (let ((r (gethash "REPOSITORY" pkg)))
+                                     (when (and r (not (member r repos)))
+                                       (push r repos))))
+                                 arch-pkg-db)
+                        (sort repos))))
+               arch-pkg-list-mode)
+  (arch-pkg--ensure-pkg-list-mode)
+  (arch-pkg-list--filter-by (lambda (pkg)
+                              (let ((pkg-repo (gethash "REPOSITORY" pkg)))
+                                (and pkg-repo (member pkg-repo repo))))
+                            (concat "repo:" (string-join repo ","))))
+
+(defun arch-pkg-list-clear-filter ()
+  "Clear any filter currently applied to the \"*Arch Packages*\" buffer."
+  (interactive nil arch-pkg-list-mode)
+  (arch-pkg--ensure-pkg-list-mode)
+  (arch-pkg-list-mode)
+  (arch-pkg-list--refresh)
+  (arch-pkg-list--display nil))
 
 (defun arch-pkg--make-button (text &rest properties)
   "Create button with TEXT and PROPERTIES, similar to `package-make-button'."
