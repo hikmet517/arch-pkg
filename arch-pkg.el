@@ -63,7 +63,30 @@ string => (symbols)")
   :doc "Local keymap for `arch-pkg-list-mode' buffers."
   :parent tabulated-list-mode-map
   "C-m"  #'arch-pkg-list-describe-package
-  "r"    #'revert-buffer)
+  "r"    #'revert-buffer
+  "/ /"  #'arch-pkg-list-clear-filter
+  "/ n"  #'arch-pkg-list-filter-by-name
+  "/ d"  #'arch-pkg-list-filter-by-description
+  "/ r"  #'arch-pkg-list-filter-by-repo)
+
+(easy-menu-define arch-pkg-list-mode-menu arch-pkg-list-mode-map
+  "Menu for `arch-pkg-list-mode'."
+  '("Package"
+    ["Describe Package" arch-pkg-list-describe-package :help "Display information about this package"]
+    ["Refresh Package List" revert-buffer :help "Re-read the local package database"]
+    "--"
+    ("Filter Packages"
+     ["Filter by Description" arch-pkg-list-filter-by-description
+      :help
+      "Prompt for regexp, display only packages with matching description"]
+     ["Filter by Name" arch-pkg-list-filter-by-name
+      :help
+      "Prompt for regexp, display only packages whose names match the regexp"]
+     ["Filter by Repository" arch-pkg-list-filter-by-repo
+      :help
+      "Prompt for repo(s), display only packages from those repositories"]
+     ["Clear Filter" arch-pkg-list-clear-filter
+      :help "Clear package list filtering, display the entire list again"])))
 
 (defvar-keymap arch-pkg-aur-list-mode-map
   :doc "Local keymap for `arch-pkg-aur-list-mode' buffers."
