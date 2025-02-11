@@ -55,7 +55,7 @@
 (defvar arch-pkg-providedby nil
   "Database for sonames and features from PROVIDE field.
 soname => (package1 package2)
-string => (symbols)")
+type: string => list of symbols")
 
 (defvar arch-pkg-aur-db nil "Database to store the results of the last AUR search")
 
@@ -64,6 +64,7 @@ string => (symbols)")
   :parent tabulated-list-mode-map
   "C-m"  #'arch-pkg-list-describe-package
   "r"    #'revert-buffer
+  "h"    #'arch-pkg-list--quick-help
   "/ /"  #'arch-pkg-list-clear-filter
   "/ n"  #'arch-pkg-list-filter-by-name
   "/ d"  #'arch-pkg-list-filter-by-description
@@ -556,6 +557,20 @@ column in the header line."
     (arch-pkg-list-mode)
     (arch-pkg-list--refresh)
     (arch-pkg-list--display nil)))
+
+;;;###autoload
+(defun arch-pkg-list--quick-help ()
+  "Show short help for key bindings in `arch-pkg-list-mode'.
+You can view the full list of keys with \\[describe-mode]."
+  (interactive nil arch-pkg-list-mode)
+  (arch-pkg--ensure-pkg-list-mode)
+  (let ((docs '("n - next"
+                "p - previous"
+                "g - refresh contents"
+                "/ - filter")))
+    (dolist (d docs)
+      (add-text-properties 0 1 '(face help-key-binding) d))
+    (message (string-join docs "\n"))))
 
 (defun arch-pkg--ensure-pkg-list-mode ()
   "Signal a user-error if major mode is not `arch-pkg-list-mode'."
