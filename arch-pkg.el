@@ -27,7 +27,6 @@
 ;; Browse Archlinux packages in Emacs, using an interface similar to built-in `package.el'.
 
 ;;; TODO:
-;; add filters
 ;; mode init/destruct
 ;; take versions into account
 ;; test: fontconfig requires libexpat.so=1-64, which is in expat package
@@ -68,6 +67,7 @@ type: string => list of symbols")
   "/ /"  #'arch-pkg-list-clear-filter
   "/ n"  #'arch-pkg-list-filter-by-name
   "/ d"  #'arch-pkg-list-filter-by-description
+  "/ m"  #'arch-pkg-list-filter-by-name-or-description
   "/ r"  #'arch-pkg-list-filter-by-repo)
 
 (easy-menu-define arch-pkg-list-mode-menu arch-pkg-list-mode-map
@@ -77,12 +77,15 @@ type: string => list of symbols")
     ["Refresh Package List" revert-buffer :help "Re-read the local package database"]
     "--"
     ("Filter Packages"
-     ["Filter by Description" arch-pkg-list-filter-by-description
-      :help
-      "Prompt for regexp, display only packages with matching description"]
      ["Filter by Name" arch-pkg-list-filter-by-name
       :help
       "Prompt for regexp, display only packages whose names match the regexp"]
+     ["Filter by Description" arch-pkg-list-filter-by-description
+      :help
+      "Prompt for regexp, display only packages whose descriptions match the regexp"]
+     ["Filter by Name pr Description" arch-pkg-list-filter-by-name-or-description
+      :help
+      "Prompt for regexp, display only packages whose names or descriptions match the regexp"]
      ["Filter by Repository" arch-pkg-list-filter-by-repo
       :help
       "Prompt for repo(s), display only packages from those repositories"]
@@ -595,7 +598,7 @@ listed in the Package Menu."
 
 (defun arch-pkg-list-filter-by-name (name)
   "Filter the \"*Arch Packages*\" buffer by the regexp NAME.
-Display only packages whose name matches the regexp NAME.
+Display only packages whose names match the regexp NAME.
 
 When called interactively, prompt for NAME.
 
@@ -610,7 +613,7 @@ If NAME is nil or the empty string, show all packages."
 
 (defun arch-pkg-list-filter-by-description (description)
   "Filter the \"*Arch Packages*\" buffer by the regexp DESCRIPTION.
-Display only packages whose description matches the regexp
+Display only packages whose descriptions match the regexp
 given as DESCRIPTION.
 
 When called interactively, prompt for DESCRIPTION."
@@ -622,6 +625,23 @@ When called interactively, prompt for DESCRIPTION."
                                 (string-match-p description
                                                 (gethash "DESC" pkg)))
                               (format "desc:%s" description))))
+
+(defun arch-pkg-list-filter-by-name-or-description (name-or-description)
+  "Filter the \"*Arch Packages*\" buffer by the regexp NAME-OR-DESCRIPTION.
+Display only packages whose names or descriptions match the regexp
+given as NAME-OR-DESCRIPTION.
+
+When called interactively, prompt for NAME-OR-DESCRIPTION."
+  (interactive (list (read-regexp "Filter by name or description (regexp)"))
+               arch-pkg-list-mode)
+  (arch-pkg--ensure-pkg-list-mode)
+  (when (and name-or-description (not (string-empty-p name-or-description)))
+    (arch-pkg-list--filter-by (lambda (pkg)
+                                (or (string-match-p name-or-description
+                                                    (gethash "NAME" pkg))
+                                    (string-match-p name-or-description
+                                                    (gethash "DESC" pkg))))
+                              (format "desc:%s" name-or-description))))
 
 (defun arch-pkg-list-filter-by-repo (repo)
   "Filter the \"*Arch Packages*\" buffer by the REPO name.
