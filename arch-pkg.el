@@ -67,7 +67,7 @@ type: string => list of symbols")
   "/ /"  #'arch-pkg-list-clear-filter
   "/ n"  #'arch-pkg-list-filter-by-name
   "/ d"  #'arch-pkg-list-filter-by-description
-  "/ m"  #'arch-pkg-list-filter-by-name-or-description
+  "/ f"  #'arch-pkg-list-filter-by-name-or-description
   "/ r"  #'arch-pkg-list-filter-by-repo)
 
 (easy-menu-define arch-pkg-list-mode-menu arch-pkg-list-mode-map
