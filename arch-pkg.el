@@ -43,6 +43,7 @@
 (require 'button)
 (require 'subr-x)
 (require 'rx)
+(require 'seq)
 
 
 ;;;; Variables
@@ -796,10 +797,18 @@ When called interactively, prompt for REPO."
               (insert (arch-pkg--propertize (string-pad "Dependencies: " width ?\s t)))
               (if-let* ((deps (gethash "DEPENDS" pkg)))
                   (dolist (dep deps)
-                    (let ((p (gethash (intern (arch-pkg--extract-package-name dep)) arch-pkg-db)))
-                      (if (and p (< (gethash "REASON" p) 2))
-                          (help-insert-xref-button dep 'help-arch-package-installed dep)
-                        (help-insert-xref-button dep 'help-arch-package dep)))
+                    (let* ((pkg-name (arch-pkg--extract-package-name dep))
+                           (p (gethash (intern pkg-name) arch-pkg-db)))
+                      (if p
+                          (if (< (gethash "REASON" p) 2)
+                              (help-insert-xref-button dep 'help-arch-package-installed dep)
+                            (help-insert-xref-button dep 'help-arch-package dep))
+                        (if (seq-some (lambda (x)
+                                        (when-let* ((p (gethash x arch-pkg-db)))
+                                          (< (gethash "REASON" p) 2)))
+                                      (gethash pkg-name arch-pkg-providedby))
+                            (help-insert-xref-button dep 'help-arch-package-installed dep)
+                          (help-insert-xref-button dep 'help-arch-package dep))))
                     (insert " "))
                 (insert "None"))
               (insert "\n")
@@ -1020,7 +1029,7 @@ When called interactively, prompt for REPO."
                   (progn
                     (unless arch-pkg-db
                       (arch-pkg--create-db))
-                    (seq-do
+                    (mapc
                      (lambda (dep)
                        (let ((p (gethash (intern (arch-pkg--extract-package-name dep)) arch-pkg-db)))
                          (if (and p (< (gethash "REASON" p) 2))
@@ -1036,7 +1045,7 @@ When called interactively, prompt for REPO."
                   (progn
                     (unless arch-pkg-db
                       (arch-pkg--create-db))
-                    (seq-do
+                    (mapc
                      (lambda (dep)
                        (let ((p (gethash (intern (arch-pkg--extract-package-name dep)) arch-pkg-db)))
                          (if (and p (< (gethash "REASON" p) 2))
@@ -1111,7 +1120,7 @@ When called interactively, prompt for REPO."
 
       (setq arch-pkg-aur-db (sort results (lambda (p1 p2) (< (gethash "NumVotes" p1)
                                                              (gethash "NumVotes" p2)))))
-      (seq-do (lambda (pkg)
+      (mapc (lambda (pkg)
                 (push (list (gethash "Name" pkg)
                             (vector (cons (gethash "Name" pkg)
                                           (list
