@@ -745,7 +745,7 @@ When called interactively, prompt for REPO."
               (insert (arch-pkg--propertize (string-pad "Description: " width ?\s t)))
               (insert (gethash "DESC" pkg "") "\n")
 
-              (insert (arch-pkg--propertize (string-pad "Url: " width ?\s t)))
+              (insert (arch-pkg--propertize (string-pad "Upstream URL: " width ?\s t)))
               (let ((url (gethash "URL" pkg)))
                 (help-insert-xref-button url 'help-url url))
               (insert "\n")
@@ -754,7 +754,7 @@ When called interactively, prompt for REPO."
                           (arch (gethash "ARCH" pkg))
                           (name (gethash "NAME" pkg))
                           (pkg-url (format "https://archlinux.org/packages/%s/%s/%s/" repo arch name)))
-                (insert (arch-pkg--propertize (string-pad "Package Url: " width ?\s t)))
+                (insert (arch-pkg--propertize (string-pad "Package URL: " width ?\s t)))
                 (help-insert-xref-button pkg-url 'help-url pkg-url)
                 (insert "\n"))
 
@@ -1010,13 +1010,19 @@ When called interactively, prompt for REPO."
               (insert (arch-pkg--propertize (string-pad "Description: " width ?\s t)))
               (insert (gethash "Description" pkg) "\n")
 
-              (insert (arch-pkg--propertize (string-pad "Url: " width ?\s t)))
+              (insert (arch-pkg--propertize (string-pad "Upstream URL: " width ?\s t)))
               (let ((url (gethash "URL" pkg)))
                 (help-insert-xref-button url 'help-url url))
               (insert "\n")
 
-              (insert (arch-pkg--propertize (string-pad "AUR Url: " width ?\s t)))
+              (insert (arch-pkg--propertize (string-pad "AUR URL: " width ?\s t)))
               (let ((url (concat "https://aur.archlinux.org/packages/"
+                                 (gethash "Name" pkg))))
+                (help-insert-xref-button url 'help-url url))
+              (insert "\n")
+
+              (insert (arch-pkg--propertize (string-pad "Git Clone URL: " width ?\s t)))
+              (let ((url (concat "https://aur.archlinux.org/"
                                  (gethash "Name" pkg))))
                 (help-insert-xref-button url 'help-url url))
               (insert "\n")
