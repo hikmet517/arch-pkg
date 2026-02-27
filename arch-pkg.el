@@ -500,6 +500,7 @@ into a hashmap and return it."
 
 (defun arch-pkg-refresh (&optional _arg _noconfirm)
   "Re-read database and list packages."
+  (interactive)
   (arch-pkg--create-db)
   (arch-pkg-list-packages))
 
