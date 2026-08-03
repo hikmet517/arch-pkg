@@ -881,7 +881,7 @@ When called interactively, prompt for REPO."
                   (insert "\n"))))
 
               (insert (arch-pkg--propertize (string-pad "Repository: " width ?\s t)))
-              (insert (arch-pkg-desc-repository pkg-desc) "\n")
+              (insert (or (arch-pkg-desc-repository pkg-desc) "") "\n")
 
               (when-let* ((grp (arch-pkg-desc-groups pkg-desc)))
                 (insert (arch-pkg--propertize (string-pad "Groups: " width ?\s t)))
