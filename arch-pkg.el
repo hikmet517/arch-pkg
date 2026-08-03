@@ -7,7 +7,7 @@
 ;; Created: 22 Jul 2022
 ;; Keywords: tools
 ;; URL: https://github.com/hikmet517/arch-pkg
-;; Version: 0.1
+;; Version: 0.2
 ;; Package-Requires: ((tabulated-list "1.0"))
 
 ;; This program is free software: you can redistribute it and/or modify
