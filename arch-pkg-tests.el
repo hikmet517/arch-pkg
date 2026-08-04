@@ -23,6 +23,7 @@
 (require 'seq)
 (require 'arch-pkg)
 
+
 (ert-deftest arch-pkg-test-parse-depends-str ()
   (should (equal (arch-pkg--parse-depends-str "libfreetype.so=6-64")
                  '("libfreetype.so" "=" "6-64")))
@@ -33,14 +34,15 @@
   (should (equal (arch-pkg--parse-depends-str "glibc")
                  '("glibc" "" ""))))
 
+
 (ert-deftest arch-pkg-test-get-desc ()
   ;; create db if needed
   (unless arch-pkg-db
     (arch-pkg--create-db))
   (should (arch-pkg-desc-p (arch-pkg--get-desc "glibc")))
   (should (arch-pkg-desc-p (arch-pkg--get-desc 'glibc)))
-  (should (arch-pkg-desc-p (arch-pkg--get-desc (assq 'glibc arch-pkg-db))))
-  (should (arch-pkg-desc-p (arch-pkg--get-desc (cdr (assq 'glibc arch-pkg-db))))))
+  (should (arch-pkg-desc-p (arch-pkg--get-desc (gethash 'glibc arch-pkg-db)))))
+
 
 (ert-deftest arch-pkg-test-read-desc-file ()
   (let* ((desc-file (file-name-concat
