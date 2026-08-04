@@ -32,6 +32,7 @@
 ;; test: gcc depends on some .so libs
 ;; test: jack as a feature
 ;; test: acpi_call-dkms and acpi_call-lts both provide acpi_call
+;; test: boost-libs has lots of indirect "requiredby"s
 
 ;;; Code:
 
@@ -545,8 +546,9 @@ Read gzipped package file, uncompress it, parse descr files into an `alist' and 
                      (dolist (p (gethash dep-name arch-pkg-providedby))
                        (let ((pr (gethash p arch-pkg-db)))
                          (if pr
-                             (when (not (member pkg-name (arch-pkg-desc-requiredby pr)))
-                               (push pkg-name (arch-pkg-desc-requiredby pr)))
+                             (let ((elem (cons dep-name pkg-name)))
+                               (when (not (member elem (arch-pkg-desc-requiredby pr)))
+                                 (push elem (arch-pkg-desc-requiredby pr))))
                            (message "Package '%s' not found for requiredby field" p)))))))
 
                ;; create `optionalfor' from `optdepends'
@@ -561,17 +563,10 @@ Read gzipped package file, uncompress it, parse descr files into an `alist' and 
                      (dolist (p (gethash dep-name arch-pkg-providedby))
                        (let ((pr (gethash p arch-pkg-db)))
                          (if pr
-                             (when (not (member pkg-name (arch-pkg-desc-optionalfor pr)))
-                               (push pkg-name (arch-pkg-desc-optionalfor pr)))
+                             (let ((elem (cons dep-name pkg-name)))
+                               (when (not (member elem (arch-pkg-desc-optionalfor pr)))
+                                 (push elem (arch-pkg-desc-optionalfor pr))))
                            (message "Package '%s' not found for optionalfor field" p))))))))
-             arch-pkg-db)
-
-    ;; sort `requiredby' and `optionalfor'
-    (maphash (lambda (_pkg-name pkg-desc)
-               (setf (arch-pkg-desc-requiredby pkg-desc)
-                     (sort (arch-pkg-desc-requiredby pkg-desc)))
-               (setf (arch-pkg-desc-optionalfor pkg-desc)
-                     (sort (arch-pkg-desc-optionalfor pkg-desc))))
              arch-pkg-db)))
 
 (define-derived-mode arch-pkg-list-mode tabulated-list-mode "Arch Package List"
@@ -607,29 +602,25 @@ Read gzipped package file, uncompress it, parse descr files into an `alist' and 
   (unless arch-pkg-db
     (arch-pkg--create-db))
 
-  ;; create list for tabulated-list-entries
-  (let ((package-list nil))
-    ;; fill package-list
-    (maphash (lambda (name desc)
-               (push (list name
-                           (vector (cons (arch-pkg-desc-name desc)
-                                         (list
-                                          'action
-                                          (lambda (but)
-                                            (arch-pkg-describe-package
-                                             (arch-pkg--extract-package-name (button-label but))))))
-                                   (arch-pkg-desc-version desc)
-                                   (or (arch-pkg-desc-repository desc) "")
-                                   (arch-pkg--format-status (arch-pkg-desc-reason desc))
-                                   (arch-pkg--format-date (arch-pkg-desc-installdate desc))
-                                   (arch-pkg--format-size (or (arch-pkg-desc-isize desc)
-                                                              (arch-pkg-desc-size desc)))
-                                   (or (arch-pkg-desc-desc desc) "")))
-                     package-list))
-             arch-pkg-db)
-
-    ;; sort and set to tabulated-list
-    (setq tabulated-list-entries (sort package-list))))
+  (setq tabulated-list-entries nil)
+  (maphash (lambda (name desc)
+             (push (list name
+                         (vector (cons (arch-pkg-desc-name desc)
+                                       (list
+                                        'action
+                                        (lambda (but)
+                                          (arch-pkg-describe-package
+                                           (arch-pkg--extract-package-name (button-label but))))))
+                                 (arch-pkg-desc-version desc)
+                                 (or (arch-pkg-desc-repository desc) "")
+                                 (arch-pkg--format-status (arch-pkg-desc-reason desc))
+                                 (arch-pkg--format-date (arch-pkg-desc-installdate desc))
+                                 (arch-pkg--format-size (or (arch-pkg-desc-isize desc)
+                                                            (arch-pkg-desc-size desc)))
+                                 (or (arch-pkg-desc-desc desc) "")))
+                   tabulated-list-entries))
+           arch-pkg-db)
+  (sort tabulated-list-entries :in-place t))
 
 (defun arch-pkg-list--display (suffix)
   "Display the Arch Package List.
@@ -753,7 +744,7 @@ When called interactively, prompt for REPO."
                                      (when (and r (not (member r repos)))
                                        (push r repos))))
                                  arch-pkg-db)
-                        (sort repos))))
+                        (sort repos :in-place t))))
                arch-pkg-list-mode)
   (arch-pkg--ensure-pkg-list-mode)
   (arch-pkg-list--filter-by (lambda (pkg)
@@ -797,7 +788,7 @@ When called interactively, prompt for REPO."
   (unless package
     (unless arch-pkg-db
       (arch-pkg--create-db))
-    (setq package (completing-read "Describe Arch Package: "
+    (setq package (completing-read "Describe Arch package: "
                                    (hash-table-keys arch-pkg-db))))
 
   (setq package (intern (arch-pkg--extract-package-name
@@ -888,16 +879,19 @@ When called interactively, prompt for REPO."
                 (dolist (pr prs)
                   (help-insert-xref-button pr 'help-arch-package pr)
                   (insert " "))
+                (delete-char -1)
                 (insert "\n"))
 
-              (insert (arch-pkg--propertize (string-pad "Dependencies: " width ?\s t)))
-              (if-let* ((deps (arch-pkg-desc-depends desc)))
-                  (dolist (dep deps)
-                    (help-insert-xref-button dep (if (arch-pkg--dep-satisfied-p dep)
-                                                     'help-arch-package-installed
-                                                   'help-arch-package)
-                                             dep)
-                    (insert " "))
+              (insert (arch-pkg--propertize (string-pad "Depends on: " width ?\s t)))
+              (if-let* ((deps (sort (arch-pkg-desc-depends desc))))
+                  (progn
+                    (dolist (dep deps)
+                      (help-insert-xref-button dep (if (arch-pkg--dep-satisfied-p dep)
+                                                       'help-arch-package-installed
+                                                     'help-arch-package)
+                                               dep)
+                      (insert " "))
+                    (delete-char -1))
                 (insert "None"))
               (insert "\n")
 
@@ -917,28 +911,75 @@ When called interactively, prompt for REPO."
                 (delete-char -1)
                 (insert "\n"))
 
-              (insert (arch-pkg--propertize (string-pad "Required By: " width ?\s t)))
-              (if-let* ((reqs (arch-pkg-desc-requiredby desc)))
-                  (dolist (req reqs)
-                    (help-insert-xref-button (symbol-name req)
-                                             (if (arch-pkg--installed-p req)
-                                                 'help-arch-package-installed
-                                               'help-arch-package)
-                                             req)
-                    (insert " "))
-                (insert "None"))
-              (insert "\n")
+              (let ((reqs (sort (seq-filter #'symbolp (arch-pkg-desc-requiredby desc))))
+                    (reqs-ind (sort (seq-group-by #'car (seq-filter #'consp (arch-pkg-desc-requiredby desc))))))
+                (when (or reqs reqs-ind)
+                  (insert (arch-pkg--propertize (string-pad "Required by: " width ?\s t)))
+                  ;; required by
+                  (when reqs
+                    (dolist (req reqs)
+                      (help-insert-xref-button (symbol-name req)
+                                               (if (arch-pkg--installed-p req)
+                                                   'help-arch-package-installed
+                                                 'help-arch-package)
+                                               req)
+                      (insert " "))
+                    (delete-char -1))
+                  ;; indirect required by
+                  (dolist (req reqs-ind)
+                    (let ((p (car req)))
+                      (insert " (through ")
+                      (help-insert-xref-button (symbol-name p)
+                                               (if (arch-pkg--installed-p p)
+                                                   'help-arch-package-installed
+                                                 'help-arch-package)
+                                               p)
+                      (insert ": "))
+                    (dolist (p (sort (mapcar #'cdr (cdr req))))
+                      (help-insert-xref-button (symbol-name p)
+                                               (if (arch-pkg--installed-p p)
+                                                   'help-arch-package-installed
+                                                 'help-arch-package)
+                                               p)
+                      (insert " "))
+                    (delete-char -1)
+                    (insert ")"))
+                  (insert "\n")))
 
-              (when-let* ((opts (arch-pkg-desc-optionalfor desc)))
-                (insert (arch-pkg--propertize (string-pad "Optional for: " width ?\s t)))
-                (dolist (opt opts)
-                  (help-insert-xref-button (symbol-name opt)
-                                           (if (arch-pkg--installed-p opt)
-                                               'help-arch-package-installed
-                                             'help-arch-package)
-                                           opt)
-                  (insert " "))
-                (insert "\n"))
+              (let ((opts (sort (seq-filter #'symbolp (arch-pkg-desc-optionalfor desc))))
+                    (opts-ind (sort (seq-group-by #'car (seq-filter #'consp (arch-pkg-desc-optionalfor desc))))))
+                (when (or opts opts-ind)
+                  (insert (arch-pkg--propertize (string-pad "Optional for: " width ?\s t)))
+                  ;; optional dependencies
+                  (when opts
+                    (dolist (opt opts)
+                      (help-insert-xref-button (symbol-name opt)
+                                               (if (arch-pkg--installed-p opt)
+                                                   'help-arch-package-installed
+                                                 'help-arch-package)
+                                               opt)
+                      (insert " "))
+                    (delete-char -1))
+                  ;; indirect optional dependencies
+                  (dolist (opt opts-ind)
+                    (let ((p (car opt)))
+                      (insert " (through ")
+                      (help-insert-xref-button (symbol-name p)
+                                               (if (arch-pkg--installed-p p)
+                                                   'help-arch-package-installed
+                                                 'help-arch-package)
+                                               p)
+                      (insert ": "))
+                    (dolist (p (sort (mapcar #'cdr (cdr opt))))
+                      (help-insert-xref-button (symbol-name p)
+                                               (if (arch-pkg--installed-p p)
+                                                   'help-arch-package-installed
+                                                 'help-arch-package)
+                                               p)
+                      (insert " "))
+                    (delete-char -1)
+                    (insert ") "))
+                  (insert "\n")))
 
               (when-let* ((cnf (arch-pkg-desc-conflicts desc)))
                 (insert (arch-pkg--propertize (string-pad "Conflicts with: " width ?\s t)))
@@ -949,6 +990,19 @@ When called interactively, prompt for REPO."
                                              'help-arch-package)
                                            c)
                   (insert " "))
+                (delete-char -1)
+                (insert "\n"))
+
+              (when-let* ((rpl (arch-pkg-desc-replaces desc)))
+                (insert (arch-pkg--propertize (string-pad "Replaces: " width ?\s t)))
+                (dolist (r rpl)
+                  (help-insert-xref-button r
+                                           (if (arch-pkg--installed-p r)
+                                               'help-arch-package-installed
+                                             'help-arch-package)
+                                           r)
+                  (insert " "))
+                (delete-char -1)
                 (insert "\n"))
 
               (insert (arch-pkg--propertize (string-pad "Architecture: " width ?\s t)))
@@ -957,20 +1011,20 @@ When called interactively, prompt for REPO."
               (insert (arch-pkg--propertize (string-pad "Maintainer: " width ?\s t)))
               (insert (arch-pkg-desc-packager desc) "\n")
 
-              (insert (arch-pkg--propertize (string-pad "Build Date: " width ?\s t)))
+              (insert (arch-pkg--propertize (string-pad "Build date: " width ?\s t)))
               (insert (arch-pkg--format-date (arch-pkg-desc-builddate desc)) "\n")
 
               (when-let* ((idate (arch-pkg-desc-installdate desc)))
-                (insert (arch-pkg--propertize (string-pad "Install Date: " width ?\s t)))
+                (insert (arch-pkg--propertize (string-pad "Install date: " width ?\s t)))
                 (insert (arch-pkg--format-date idate) "\n"))
 
               (when-let* ((isize (or (arch-pkg-desc-size desc)
                                      (arch-pkg-desc-isize desc))))
-                (insert (arch-pkg--propertize (string-pad "Install Size: " width ?\s t)))
+                (insert (arch-pkg--propertize (string-pad "Install size: " width ?\s t)))
                 (insert (arch-pkg--format-size isize) "\n"))
 
               (when-let* ((csize (arch-pkg-desc-csize desc)))
-                (insert (arch-pkg--propertize (string-pad "Download Size: " width ?\s t)))
+                (insert (arch-pkg--propertize (string-pad "Download size: " width ?\s t)))
                 (insert (arch-pkg--format-size csize) "\n"))
 
               (when-let* ((val (arch-pkg-desc-validation desc)))
@@ -1237,8 +1291,10 @@ To be used by `arch-pkg-aur-list-mode'."
       (unless results
         (error "Json does not contain 'results' key"))
 
-      (setq arch-pkg-aur-db (sort results (lambda (p1 p2) (< (gethash "NumVotes" p1)
-                                                             (gethash "NumVotes" p2)))))
+      (setq arch-pkg-aur-db (sort results
+                                  :lessp (lambda (p1 p2) (< (gethash "NumVotes" p1)
+                                                            (gethash "NumVotes" p2)))
+                                  :in-place t))
       (mapc (lambda (pkg)
               (push (list (gethash "Name" pkg)
                           (vector (cons (gethash "Name" pkg)

@@ -35,15 +35,6 @@
                  '("glibc" "" ""))))
 
 
-(ert-deftest arch-pkg-test-get-desc ()
-  ;; create db if needed
-  (unless arch-pkg-db
-    (arch-pkg--create-db))
-  (should (arch-pkg-desc-p (arch-pkg--get-desc "glibc")))
-  (should (arch-pkg-desc-p (arch-pkg--get-desc 'glibc)))
-  (should (arch-pkg-desc-p (arch-pkg--get-desc (gethash 'glibc arch-pkg-db)))))
-
-
 (ert-deftest arch-pkg-test-read-desc-file ()
   (let* ((desc-file (file-name-concat
                      (seq-random-elt
@@ -56,3 +47,23 @@
     (should (stringp (arch-pkg-desc-version desc)))
     (should (stringp (arch-pkg-desc-desc desc)))
     (should (listp (arch-pkg-desc-licenses desc)))))
+
+
+(ert-deftest arch-pkg-test-get-desc ()
+  ;; create db if needed
+  (unless arch-pkg-db
+    (arch-pkg--create-db))
+  (should (arch-pkg-desc-p (arch-pkg--get-desc "glibc")))
+  (should (arch-pkg-desc-p (arch-pkg--get-desc 'glibc)))
+  (should (arch-pkg-desc-p (arch-pkg--get-desc (gethash 'glibc arch-pkg-db)))))
+
+
+(ert-deftest arch-pkg-test-db ()
+  ;; create db if needed
+  (unless arch-pkg-db
+    (arch-pkg--create-db))
+  (should (hash-table-p arch-pkg-db))
+  (should (seq-every-p (lambda (desc)
+                         (and (stringp (arch-pkg-desc-name desc))
+                              (stringp (arch-pkg-desc-version desc))))
+                       (hash-table-values arch-pkg-db))))
