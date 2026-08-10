@@ -41,6 +41,7 @@
 
 (require 'button)
 (require 'cl-lib)
+(require 'font-lock)
 (require 'help-mode)
 (require 'rx)
 (require 'seq)
@@ -105,12 +106,6 @@ type: symbol => list of symbols")
   "C-m"  #'arch-pkg-aur-list-describe-package
   "r"    #'revert-buffer)
 
-(defvar-keymap arch-pkg-file-list-mode-map
-  :doc "Local keymap for `arch-pkg-file-list-mode' buffers."
-  "C-m"        #'arch-pkg--find-file-other-window-background
-  "r"          #'arch-pkg--find-file
-  "<mouse-1>"  #'arch-pkg--find-file)
-
 
 ;;;; User options
 
@@ -129,6 +124,37 @@ type: symbol => list of symbols")
   "Package delete command.  %s will be replaced by package name."
   :type '(string)
   :group 'arch-pkg)
+
+;;;; Faces
+
+
+(defface arch-pkg-name
+  '((t :inherit link))
+  "Face used on package names in the arch package menu.")
+
+(defface arch-pkg-description
+  '((t :inherit default))
+  "Face used on package description summaries in the arch package menu.")
+
+(defface arch-pkg-status-built-in
+  '((t :inherit font-lock-builtin-face))
+  "Face used on the fields other than name and description of built-in packages.")
+
+(defface arch-pkg-status-installed
+  '((t :inherit font-lock-constant-face))
+  "Face used on the fields other than name and description of installed arch packages.")
+
+(defface arch-pkg-status-not-installed
+  '((t :inherit arch-pkg-status-built-in))
+  "Face used on the fields other than name and description of not installed arch packages.")
+
+(defface arch-pkg-status-dependency
+  '((t :inherit font-lock-type-face))
+  "Face used on the fields other than name and description of dependency packages.")
+
+(defface arch-pkg-status-installed-foreign
+  '((t :inherit (font-lock-string-face)))
+  "Face used on the fields other than description of foreign arch packages.")
 
 
 ;;;; Data Types
@@ -154,6 +180,11 @@ type: symbol => list of symbols")
   'help-function 'arch-pkg-aur-describe-package
   'help-echo (purecopy "mouse-2, RET: Describe package")
   'face '(:inherit font-lock-type-face :underline t))
+
+(define-button-type 'help-arch-package-files
+  :supertype 'help-xref
+  'help-function 'arch-pkg-show-files
+  'help-echo (purecopy "mouse-2, RET: Show files"))
 
 (cl-defstruct (arch-pkg-desc (:constructor arch-pkg-desc-create))
   "Package description structure for \"desc\" files."
@@ -201,7 +232,7 @@ type: symbol => list of symbols")
   ;; (backup nil :type list)
   ;; (removes nil :type list)
 
-  ;; 0: insalled, 1: dependency, 2: not installed (0 and 2 assigned by us)
+  ;; 0: installed, 1: dependency, 2: not installed (0 and 2 assigned by us)
   (reason nil :type integer)
 
   ;; (xdata nil :type list)
@@ -373,21 +404,6 @@ Used in `arch-pkg-describe-package'"
 
 
 ;;;; Functions
-
-(define-derived-mode arch-pkg-file-list-mode special-mode "arch-pkg file-list mode"
-  "Major mode used in arch-pkg when displaying list of files of packages.
-
-\\{arch-pkg-file-list-mode-map}"
-  (let ((inhibit-read-only t))
-    (goto-char (point-min))
-    (while (not (eobp))
-      (add-text-properties
-       (line-beginning-position)
-       (line-end-position)
-       '(mouse-face highlight help-echo "mouse-1: visit this file"))
-      (forward-line))
-    (goto-char (point-min)))
-  (setq buffer-read-only t))
 
 (defun arch-pkg--parse-desc (beg end)
   "Parse the portion of current descr buffer given with BEG and END and return `arch-pkg-desc'."
@@ -604,21 +620,28 @@ Read gzipped package file, uncompress it, parse descr files into an `alist' and 
 
   (setq tabulated-list-entries nil)
   (maphash (lambda (name desc)
-             (push (list name
-                         (vector (cons (arch-pkg-desc-name desc)
-                                       (list
-                                        'action
-                                        (lambda (but)
-                                          (arch-pkg-describe-package
-                                           (arch-pkg--extract-package-name (button-label but))))))
-                                 (arch-pkg-desc-version desc)
-                                 (or (arch-pkg-desc-repository desc) "")
-                                 (arch-pkg--format-status (arch-pkg-desc-reason desc))
-                                 (arch-pkg--format-date (arch-pkg-desc-installdate desc))
-                                 (arch-pkg--format-size (or (arch-pkg-desc-isize desc)
-                                                            (arch-pkg-desc-size desc)))
-                                 (or (arch-pkg-desc-desc desc) "")))
-                   tabulated-list-entries))
+             (let ((face (if (null (arch-pkg-desc-repository desc))
+                             'arch-pkg-status-installed-foreign
+                           (nth (arch-pkg-desc-reason desc)
+                                (list 'arch-pkg-status-installed
+                                      'arch-pkg-status-dependency
+                                      'arch-pkg-status-not-installed)))))
+               (push (list name
+                           (vector (list (arch-pkg-desc-name desc)
+                                         'package-name (arch-pkg-desc-name desc)
+                                         'follow-link t
+                                         'action 'arch-pkg-list-describe-package
+                                         'face 'arch-pkg-name
+                                         'font-lock-face 'arch-pkg-name)
+                                   (propertize (arch-pkg-desc-version desc) 'font-lock-face face)
+                                   (propertize (or (arch-pkg-desc-repository desc) "") 'font-lock-face face)
+                                   (propertize (arch-pkg--format-status (arch-pkg-desc-reason desc)) 'font-lock-face face)
+                                   (propertize (arch-pkg--format-date (arch-pkg-desc-installdate desc)) 'font-lock-face face)
+                                   (propertize (arch-pkg--format-size (or (arch-pkg-desc-isize desc)
+                                                                          (arch-pkg-desc-size desc)))
+                                               'font-lock-face face)
+                                   (propertize (or (arch-pkg-desc-desc desc) "") 'font-lock-face 'arch-pkg-description)))
+                     tabulated-list-entries)))
            arch-pkg-db)
   (sort tabulated-list-entries :in-place t))
 
@@ -851,6 +874,14 @@ When called interactively, prompt for REPO."
               (let ((status (arch-pkg-desc-reason desc)))
                 (insert (arch-pkg--propertize (string-pad "Status: " width ?\s t)))
                 (insert (arch-pkg--format-status status 'show-not-installed))
+                (when (or (= status 0)
+                          (= status 1))
+                  (insert " (")
+                  (help-insert-xref-button "files"
+                                           'help-arch-package-files
+                                           (arch-pkg-desc-name desc)
+                                           (arch-pkg-desc-version desc))
+                  (insert ")"))
                 (cond
                  ((= status 0)    ; installed
                   (insert " -- ")
@@ -1029,21 +1060,11 @@ When called interactively, prompt for REPO."
 
               (when-let* ((val (arch-pkg-desc-validation desc)))
                 (insert (arch-pkg--propertize (string-pad "Validation: " width ?\s t)))
-                (insert val "\n"))
-
-              (let ((status (arch-pkg-desc-reason desc)))
-                (when (or (= status 0)
-                          (= status 1))
-                  (insert (arch-pkg--propertize (string-pad "Files: " width ?\s t)))
-                  (arch-pkg--make-button "Show files"
-                                         'action #'arch-pkg-show-files-action
-                                         'package-name (arch-pkg-desc-name desc)
-                                         'version (arch-pkg-desc-version desc)))))))))))
+                (insert val "\n")))))))))
 
 (defun arch-pkg-delete-action (button)
   "Delete action for BUTTON in help."
   (let ((pkg-name (button-get button 'package-name)))
-    (message "%s" (symbolp pkg-name))
     (when (y-or-n-p (format-message "Delete package `%s'? " pkg-name))
       (arch-pkg-delete-package pkg-name))))
 
@@ -1063,57 +1084,53 @@ When called interactively, prompt for REPO."
   (async-shell-command (format arch-pkg-install-command package))
   (pop-to-buffer shell-command-buffer-name-async))
 
-(defun arch-pkg-show-files-action (button)
-  "Show files action for BUTTON in help."
-  (let* ((pkg-name (button-get button 'package-name))
-         (version (button-get button 'version))
-         (filename (file-name-concat arch-pkg-local-db-path
-                                     (concat pkg-name "-" version)
-                                     "files")))
+(defun arch-pkg--get-package-files (package version)
+  (let ((filename (file-name-concat arch-pkg-local-db-path
+                                    (concat package "-" version)
+                                    "files"))
+        (files '()))
     (when (file-exists-p filename)
-      (let ((buf (get-buffer-create (format "*Files of <%s>*" pkg-name))))
-        (with-current-buffer buf
-          (let ((inhibit-read-only t))
-            (erase-buffer)
-            (insert-file-contents filename)
-            (goto-char (point-min))
-            (kill-line 1)               ; kill %FILE%
-            (while (not (eobp))
-              (let ((line (buffer-substring-no-properties (line-beginning-position)
-                                                          (line-end-position))))
-                (cond
-                 ((string-empty-p line)
-                  (kill-region (point) (point-max)))
-                 ((string-suffix-p "/" line)
-                  (kill-line 1))
-                 (t
-                  (insert "/")
-                  (forward-line)))))
-            (goto-char (point-min)))
-          (arch-pkg-file-list-mode)
-          (display-buffer buf))))))
+      (with-temp-buffer
+        (insert-file-contents filename)
+        (re-search-forward (regexp-quote "%FILES%") nil 'NOERROR)
+        (forward-line)
+        (let ((cont t))
+          (while cont
+            (let ((line (buffer-substring-no-properties (line-beginning-position)
+                                                        (line-end-position))))
+              (cond
+               ((string-empty-p line)
+                (setq cont nil))
+               ((not (string-suffix-p "/" line))
+                (push (concat "/" line) files)))
+              (forward-line))))))
+    (reverse files)))
 
-(defun arch-pkg--find-file ()
+(defun arch-pkg-show-files (package version)
+  "Show files action for BUTTON in help."
+  (let* ((files (arch-pkg--get-package-files package version)))
+    (when files
+      (help-setup-xref (list #'arch-pkg-show-files package version)
+                       (called-interactively-p 'interactive))
+      (with-help-window (help-buffer)
+        (with-current-buffer standard-output
+          (insert (format "Files owned by %s-%s:\n" package version))
+          (dolist (file files)
+            (insert-text-button file
+                                'type 'help-arch-package-files
+                                'action #'arch-pkg--find-file
+                                'file file
+                                'follow-link t)
+            (insert "\n")))))))
+
+(defun arch-pkg--find-file (&optional button)
   (interactive)
-  (let ((filename (buffer-substring-no-properties
-                   (line-beginning-position)
-                   (line-end-position))))
-    (unless (or (string-empty-p filename) (eolp))
+  (let ((filename (if button (button-get button 'file)
+                    (buffer-substring-no-properties
+                     (line-beginning-position)
+                     (line-end-position)))))
+    (unless (string-empty-p filename)
       (find-file filename))))
-
-(defun arch-pkg--find-file-other-window-background ()
-  (interactive)
-  (let* ((filename (buffer-substring-no-properties
-                    (line-beginning-position)
-                    (line-end-position)))
-         (value (find-file-noselect filename)))
-    (if (listp value)
-        (progn
-          (setq value (nreverse value))
-          (display-buffer (car value))
-          (mapc 'display-buffer (cdr value))
-          value)
-      (display-buffer value))))
 
 (define-derived-mode arch-pkg-aur-list-mode tabulated-list-mode "AUR Package List"
   "Major mode for browsing a list of packages in AUR Search results.
