@@ -48,6 +48,7 @@
 (require 'subr-x)
 (require 'tabulated-list)
 (require 'url)
+(require 'tree-widget)
 
 
 ;;;; Variables
@@ -70,6 +71,7 @@ type: symbol => list of symbols")
   :doc "Local keymap for `arch-pkg-list-mode' buffers."
   :parent tabulated-list-mode-map
   "C-m"  #'arch-pkg-list-describe-package
+  "d"    #'arch-pkg-describe-package
   "r"    #'revert-buffer
   "h"    #'arch-pkg-list--quick-help
   "/ /"  #'arch-pkg-list-clear-filter
@@ -185,6 +187,11 @@ type: symbol => list of symbols")
   :supertype 'help-xref
   'help-function 'arch-pkg-show-files
   'help-echo (purecopy "mouse-2, RET: Show files"))
+
+(define-button-type 'help-arch-package-dep-tree
+  :supertype 'help-xref
+  'help-function 'arch-pkg-show-dependency-tree
+  'help-echo (purecopy "mouse-2, RET: Show dependency tree"))
 
 (cl-defstruct (arch-pkg-desc (:constructor arch-pkg-desc-create))
   "Package description structure for \"desc\" files."
@@ -320,15 +327,17 @@ Example: libglib-2.0.so=0-64 returns ('libglib-2.0.so' '=' '0-64')"
 Returns string."
   (car (arch-pkg--parse-depends-str s)))
 
-(defun arch-pkg--get-desc (x)
-  "Get `arch-pkg-desc' from X.
-X may be of type `string', `symbol' or `arch-pkg-desc'."
-  (when (stringp x)
-    (setq x (intern (arch-pkg--extract-package-name x))))
-  (cond ((arch-pkg-desc-p x)
-         x)
-        ((symbolp x)
-         (gethash x arch-pkg-db))
+(defun arch-pkg--get-desc (pkg)
+  "Get `arch-pkg-desc' from PKG.
+PKG may be of type `string', `symbol' or `arch-pkg-desc'."
+  (when (stringp pkg)
+    (setq pkg (intern (arch-pkg--extract-package-name pkg))))
+  (cond ((arch-pkg-desc-p pkg)
+         pkg)
+        ((symbolp pkg)
+         (unless arch-pkg-db
+           (arch-pkg--create-db))
+         (gethash pkg arch-pkg-db))
         (t nil)))
 
 (defun arch-pkg--installed-p (p)
@@ -645,7 +654,7 @@ Read gzipped package file, uncompress it, parse descr files into an `alist' and 
            arch-pkg-db)
   (sort tabulated-list-entries :in-place t))
 
-(defun arch-pkg-list--display (suffix)
+(defun arch-pkg-list--display (&optional suffix)
   "Display the Arch Package List.
 If SUFFIX is non-nil, append that to \"Package\" for the first
 column in the header line."
@@ -781,7 +790,7 @@ When called interactively, prompt for REPO."
   (arch-pkg--ensure-pkg-list-mode)
   (arch-pkg-list-mode)
   (arch-pkg-list--refresh)
-  (arch-pkg-list--display nil))
+  (arch-pkg-list--display))
 
 (defun arch-pkg--make-button (text &rest properties)
   "Create button with TEXT and PROPERTIES, similar to `package-make-button'."
@@ -922,7 +931,11 @@ When called interactively, prompt for REPO."
                                                      'help-arch-package)
                                                dep)
                       (insert " "))
-                    (delete-char -1))
+                    (insert "(")
+                    (help-insert-xref-button "dependency tree"
+                                             'help-arch-package-dep-tree
+                                             (arch-pkg-desc-name desc))
+                    (insert ")"))
                 (insert "None"))
               (insert "\n")
 
@@ -1114,7 +1127,7 @@ When called interactively, prompt for REPO."
                        (called-interactively-p 'interactive))
       (with-help-window (help-buffer)
         (with-current-buffer standard-output
-          (insert (format "Files owned by %s-%s:\n" package version))
+          (insert (format "Files owned by %s-%s:\n\n" package version))
           (dolist (file files)
             (insert-text-button file
                                 'type 'help-arch-package-files
@@ -1131,6 +1144,38 @@ When called interactively, prompt for REPO."
                      (line-end-position)))))
     (unless (string-empty-p filename)
       (find-file filename))))
+
+(defun arch-pkg--dep-tree-expander (tree)
+  (when-let* ((pkg (widget-get tree :tag))
+              (desc (arch-pkg--get-desc pkg))
+              (children (sort (arch-pkg-desc-depends desc))))
+    (mapcar (lambda (val)
+              `(tree-widget
+                :tag ,val
+                :expander arch-pkg--dep-tree-expander))
+            children)))
+
+(defun arch-pkg-show-dependency-tree (&optional pkg)
+  "Show dependencies of PKG as a tree."
+  (interactive)
+  (unless arch-pkg-db
+    (arch-pkg--create-db))
+  (unless pkg
+    (setq pkg (completing-read "Dependency tree for Arch package: "
+                               (hash-table-keys arch-pkg-db))))
+  (when-let* ((desc (arch-pkg--get-desc pkg))
+              (pkg-name (arch-pkg-desc-name desc)))
+    (help-setup-xref (list #'arch-pkg-show-dependency-tree pkg)
+                     (called-interactively-p 'interactive))
+    (with-help-window (help-buffer)
+      (with-current-buffer standard-output
+        (let ((inhibit-read-only t))
+          (erase-buffer)
+          (insert (format "Dependencies of %s:\n\n" pkg-name))
+          (widget-create 'tree-widget
+                         :tag pkg-name
+                         :open t
+                         :expander #'arch-pkg--dep-tree-expander))))))
 
 (define-derived-mode arch-pkg-aur-list-mode tabulated-list-mode "AUR Package List"
   "Major mode for browsing a list of packages in AUR Search results.
@@ -1212,7 +1257,7 @@ When called interactively, prompt for REPO."
               (insert (string-join (gethash "License" pkg) ", ") "\n")
 
               (insert (arch-pkg--propertize (string-pad "Dependencies: " width ?\s t)))
-              (if-let* ((deps (gethash "Depends" pkg)))
+              (if-let* ((deps (sort (gethash "Depends" pkg))))
                   (progn
                     (unless arch-pkg-db
                       (arch-pkg--create-db))
