@@ -1105,7 +1105,7 @@ When called interactively, prompt for REPO."
     (when (file-exists-p filename)
       (with-temp-buffer
         (insert-file-contents filename)
-        (re-search-forward (regexp-quote "%FILES%") nil 'NOERROR)
+        (search-forward "%FILES%" nil 'NOERROR)
         (forward-line)
         (let ((cont t))
           (while cont
@@ -1267,12 +1267,13 @@ When called interactively, prompt for REPO."
                                                            'help-aur-package)
                                                      dep)
                             (insert " "))
-                          deps))
+                          deps)
+                    (delete-char -1))
                 (insert "None"))
               (insert "\n")
 
               (insert (arch-pkg--propertize (string-pad "Build Dependencies: " width ?\s t)))
-              (if-let* ((deps (gethash "MakeDepends" pkg)))
+              (if-let* ((deps (sort (gethash "MakeDepends" pkg))))
                   (progn
                     (unless arch-pkg-db
                       (arch-pkg--create-db))
@@ -1366,8 +1367,8 @@ To be used by `arch-pkg-aur-list-mode'."
                                            (arch-pkg-aur-describe-package
                                             (button-label but)))))
                                   (gethash "Version" pkg)
-                                  (number-to-string (gethash "NumVotes" pkg))
-                                  (number-to-string (gethash "Popularity" pkg))
+                                  (format "%d" (gethash "NumVotes" pkg))
+                                  (format "%f" (gethash "Popularity" pkg))
                                   (arch-pkg--format-date (gethash "LastModified" pkg))
                                   (let ((desc (gethash "Description" pkg)))
                                     (if (eq desc :null) "" desc))))
