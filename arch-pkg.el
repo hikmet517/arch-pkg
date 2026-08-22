@@ -24,15 +24,14 @@
 ;; along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 ;;; Commentary:
-;; Browse Archlinux packages in Emacs, using an interface similar to built-in `package.el'.
+;; Browse Arch Linux packages in Emacs using an interface similar to built-in `package.el'.
 
-;;; TODO:
-;; take versions into account
-;; test: fontconfig requires libexpat.so=1-64, which is in expat package
-;; test: gcc depends on some .so libs
-;; test: jack as a feature
-;; test: acpi_call-dkms and acpi_call-lts both provide acpi_call
-;; test: boost-libs has lots of indirect "requiredby"s
+;;; Check:
+;; - fontconfig requires libexpat.so=1-64, which is in expat package
+;; - gcc depends on some .so libs
+;; - jack as a feature
+;; - acpi_call-dkms and acpi_call-lts both provide acpi_call
+;; - boost-libs has lots of indirect "requiredby"s
 
 ;;; Code:
 
@@ -45,10 +44,11 @@
 (require 'help-mode)
 (require 'rx)
 (require 'seq)
+(require 'shell)
 (require 'subr-x)
 (require 'tabulated-list)
-(require 'url)
 (require 'tree-widget)
+(require 'url)
 
 
 ;;;; Variables
@@ -118,12 +118,17 @@ type: symbol => list of symbols")
   :link '(url-link "https://github.com/hikmet517/arch-pkg"))
 
 (defcustom arch-pkg-install-command "sudo pacman -S %s"
-  "Package install command.  %s will be replaced by package name."
+  "Package install command.  %s will be replaced with package name."
   :type '(string)
   :group 'arch-pkg)
 
 (defcustom arch-pkg-delete-command "sudo pacman -R %s"
-  "Package delete command.  %s will be replaced by package name."
+  "Package delete command.  %s will be replaced with package name."
+  :type '(string)
+  :group 'arch-pkg)
+
+(defcustom arch-pkg-aur-install-command "yay -S %s"
+  "Package install command for AUR.  %s will be replaced with package name."
   :type '(string)
   :group 'arch-pkg)
 
@@ -258,7 +263,11 @@ type: symbol => list of symbols")
                                              depends optdepends checkdepends makedepends
                                              conflicts replaces provides
                                              &allow-other-keys)
-  "Create `arch-pkg-desc' from a plist of symbols and strings."
+  "Create `arch-pkg-desc' from a plist of symbols and strings.
+Optional keyword arguments: NAME, VERSION, DESC, URL, PACKAGER, ARCH,
+VALIDATION, REASON, BUILDDATE, INSTALLDATE, SIZE, ISIZE, CSIZE, LICENSE,
+GROUPS, DEPENDS, OPTDEPENDS, CHECKDEPENDS, MAKEDEPENDS, CONFLICTS,
+REPLACES, PROVIDES."
   (when installdate
     (setq installdate (string-to-number installdate)))
   (arch-pkg-desc-create
@@ -373,9 +382,9 @@ For debugging."
         (arch-pkg-desc-print desc)
       (insert "package not found"))))
 
-(defun arch-pkg--format-date (d)
-  "Format unix date T (integer) as ISO date string."
-  (format-time-string "%Y-%m-%d %H:%M" d))
+(defun arch-pkg--format-date (date)
+  "Format unix date DATE (integer) as ISO date string."
+  (format-time-string "%Y-%m-%d %H:%M" date))
 
 (defun arch-pkg--format-status (n &optional show-not-installed)
   "Format package status N (an integer).
@@ -553,8 +562,7 @@ Read gzipped package file, uncompress it, parse descr files into an `alist' and 
                (let ((provides (arch-pkg-desc-provides desc)))
                  (dolist (p provides)
                    (let ((p-sym (intern (arch-pkg--extract-package-name p))))
-                     (when (not (member name (gethash p-sym arch-pkg-providedby)))
-                       (push name (gethash p-sym arch-pkg-providedby)))))))
+                     (cl-pushnew name (gethash p-sym arch-pkg-providedby))))))
              arch-pkg-db)
 
     ;; fill additional fields: `requiredby', `optionalfor' of `arch-pkg-desc'
@@ -565,15 +573,13 @@ Read gzipped package file, uncompress it, parse descr files into an `alist' and 
                         (dep-desc (gethash dep-name arch-pkg-db)))
                    (if dep-desc
                        ;; if package exists, add it
-                       (when (not (member pkg-name (arch-pkg-desc-requiredby dep-desc)))
-                         (push pkg-name (arch-pkg-desc-requiredby dep-desc)))
+                       (cl-pushnew pkg-name (arch-pkg-desc-requiredby dep-desc))
                      ;; if it doesn't exist, it might be a feature, check `arch-pkg-providedby'
                      (dolist (p (gethash dep-name arch-pkg-providedby))
                        (let ((pr (gethash p arch-pkg-db)))
                          (if pr
                              (let ((elem (cons dep-name pkg-name)))
-                               (when (not (member elem (arch-pkg-desc-requiredby pr)))
-                                 (push elem (arch-pkg-desc-requiredby pr))))
+                               (cl-pushnew elem (arch-pkg-desc-requiredby pr)))
                            (message "Package '%s' not found for requiredby field" p)))))))
 
                ;; create `optionalfor' from `optdepends'
@@ -582,15 +588,13 @@ Read gzipped package file, uncompress it, parse descr files into an `alist' and 
                         (dep-desc (gethash dep-name arch-pkg-db)))
                    (if dep-desc
                        ;; if package exists, add it
-                       (when (not (member pkg-name (arch-pkg-desc-optionalfor dep-desc)))
-                         (push pkg-name (arch-pkg-desc-optionalfor dep-desc)))
+                       (cl-pushnew pkg-name (arch-pkg-desc-optionalfor dep-desc))
                      ;; if it doesn't exist, it might be a feature, check `arch-pkg-providedby'
                      (dolist (p (gethash dep-name arch-pkg-providedby))
                        (let ((pr (gethash p arch-pkg-db)))
                          (if pr
                              (let ((elem (cons dep-name pkg-name)))
-                               (when (not (member elem (arch-pkg-desc-optionalfor pr)))
-                                 (push elem (arch-pkg-desc-optionalfor pr))))
+                               (cl-pushnew elem (arch-pkg-desc-optionalfor pr)))
                            (message "Package '%s' not found for optionalfor field" p))))))))
              arch-pkg-db)))
 
@@ -663,11 +667,11 @@ column in the header line."
             (concat "Package[" suffix "]")
           "Package"))
   (tabulated-list-init-header)
-  (tabulated-list-print t))
+  (tabulated-list-print 'remember))
 
 ;;;###autoload
 (defun arch-pkg-list-packages ()
-  "Display a list of Archlinux packages."
+  "Display a list of Arch Linux packages."
   (interactive)
 
   ;; create db if needed
@@ -679,9 +683,8 @@ column in the header line."
     (pop-to-buffer-same-window buf)
     (arch-pkg-list-mode)
     (arch-pkg-list--refresh)
-    (arch-pkg-list--display nil)))
+    (arch-pkg-list--display)))
 
-;;;###autoload
 (defun arch-pkg-list--quick-help ()
   "Show short help for key bindings in `arch-pkg-list-mode'.
 You can view the full list of keys with \\[describe-mode]."
@@ -772,9 +775,8 @@ When called interactively, prompt for REPO."
                       "Filter by repository (comma separated): "
                       (let ((repos '()))
                         (maphash (lambda (_name pkg)
-                                   (let ((r (arch-pkg-desc-repository pkg)))
-                                     (when (and r (not (member r repos)))
-                                       (push r repos))))
+                                   (when-let* ((r (arch-pkg-desc-repository pkg)))
+                                     (cl-pushnew r repos)))
                                  arch-pkg-db)
                         (sort repos :in-place t))))
                arch-pkg-list-mode)
@@ -1075,16 +1077,54 @@ When called interactively, prompt for REPO."
                 (insert (arch-pkg--propertize (string-pad "Validation: " width ?\s t)))
                 (insert val "\n")))))))))
 
+(defun arch-pkg--post-refresh ()
+  "Perform refreshes after an action."
+  (let ((buf (get-buffer "*Arch Packages*")))
+    (when (buffer-live-p buf)
+      (with-current-buffer buf
+        (arch-pkg--create-db)
+        (arch-pkg-list--refresh)
+        (arch-pkg-list--display))))
+  (let ((buf (get-buffer "*Help*")))
+    (when (buffer-live-p buf)
+      (with-current-buffer buf
+        (revert-buffer)))))
+
+(defun arch-pkg--run-command (name command)
+  "Run COMMAND with the NAME.
+When the command finishes updates the package list if needed.  Used for actions."
+  (let* ((buf "*arch-pkg-command*")
+         (process (start-process-shell-command name buf command)))
+    (set-process-filter process #'comint-output-filter)
+    (pop-to-buffer-same-window buf)
+    (with-current-buffer buf
+      (shell-command-mode))
+    (set-process-sentinel
+     process
+     (lambda (process _event)
+       (when (eq (process-status process) 'exit)
+         (arch-pkg--post-refresh))))))
+
+(defun arch-pkg-delete-package (package)
+  "Run delete command for given PACKAGE."
+  (arch-pkg--run-command "arch-pkg-delete"
+                         (format arch-pkg-delete-command package)))
+
 (defun arch-pkg-delete-action (button)
   "Delete action for BUTTON in help."
   (let ((pkg-name (button-get button 'package-name)))
     (when (y-or-n-p (format-message "Delete package `%s'? " pkg-name))
       (arch-pkg-delete-package pkg-name))))
 
-(defun arch-pkg-delete-package (package)
-  "Run delete command for given PACKAGE."
-  (async-shell-command (format arch-pkg-delete-command package))
-  (pop-to-buffer shell-command-buffer-name-async))
+(defun arch-pkg-install-package (package)
+  "Run install command for given PACKAGE."
+  (arch-pkg--run-command "arch-pkg-install"
+                         (format arch-pkg-install-command package)))
+
+(defun arch-pkg-install-aur-package (package)
+  "Run install command for given PACKAGE."
+  (arch-pkg--run-command "arch-pkg-install"
+                         (format arch-pkg-aur-install-command package)))
 
 (defun arch-pkg-install-action (button)
   "Install action for BUTTON in help."
@@ -1092,12 +1132,14 @@ When called interactively, prompt for REPO."
     (when (y-or-n-p (format-message "Install package `%s'? " pkg-name))
       (arch-pkg-install-package pkg-name))))
 
-(defun arch-pkg-install-package (package)
-  "Run install command for given PACKAGE."
-  (async-shell-command (format arch-pkg-install-command package))
-  (pop-to-buffer shell-command-buffer-name-async))
+(defun arch-pkg-aur-install-action (button)
+  "Install action for BUTTON in help."
+  (let ((pkg-name (button-get button 'package-name)))
+    (when (y-or-n-p (format-message "Install package `%s'? " pkg-name))
+      (arch-pkg-install-aur-package pkg-name))))
 
 (defun arch-pkg--get-package-files (package version)
+  "Get files owned by PACKAGE with VERSION."
   (let ((filename (file-name-concat arch-pkg-local-db-path
                                     (concat package "-" version)
                                     "files"))
@@ -1120,7 +1162,7 @@ When called interactively, prompt for REPO."
     (reverse files)))
 
 (defun arch-pkg-show-files (package version)
-  "Show files action for BUTTON in help."
+  "Show files for PACKAGE with VERSION."
   (let* ((files (arch-pkg--get-package-files package version)))
     (when files
       (help-setup-xref (list #'arch-pkg-show-files package version)
@@ -1137,6 +1179,7 @@ When called interactively, prompt for REPO."
             (insert "\n")))))))
 
 (defun arch-pkg--find-file (&optional button)
+  "Find file from the BUTTON or the current line."
   (interactive)
   (let ((filename (if button (button-get button 'file)
                     (buffer-substring-no-properties
@@ -1146,6 +1189,7 @@ When called interactively, prompt for REPO."
       (find-file filename))))
 
 (defun arch-pkg--dep-tree-expander (tree)
+  "Expand TREE by returning the children.  For dependency trees."
   (when-let* ((pkg (widget-get tree :tag))
               (desc (arch-pkg--get-desc pkg))
               (children (sort (arch-pkg-desc-depends desc))))
@@ -1195,7 +1239,7 @@ When called interactively, prompt for REPO."
     (toggle-truncate-lines +1)))
 
 (defun arch-pkg--aur-info-cb (status package)
-  "Callback of url-retrieve for AUR info."
+  "Callback of `url-retrieve' for AUR info.  Evaluates STATUS and PACKAGE."
   (let ((err (plist-get status :error)))
     (when err
       (error "Fetch failed")
@@ -1228,7 +1272,12 @@ When called interactively, prompt for REPO."
               (setq buffer-file-coding-system 'utf-8)
 
               (insert (arch-pkg--propertize (string-pad "Name: " width ?\s t)))
-              (insert (gethash "Name" pkg) "\n")
+              (insert (gethash "Name" pkg))
+              (insert " -- ")
+              (arch-pkg--make-button "Install"
+                                     'action #'arch-pkg-aur-install-action
+                                     'package-name package)
+              (insert "\n")
 
               (insert (arch-pkg--propertize (string-pad "Version: " width ?\s t)))
               (insert (gethash "Version" pkg) "\n")
@@ -1330,7 +1379,7 @@ To be used by `arch-pkg-aur-list-mode'."
         (url-retrieve url #'arch-pkg--aur-info-cb (list package) t)))))
 
 (defun arch-pkg--aur-search-cb (status query)
-  "Callback of url-retrieve for AUR search."
+  "Callback of `url-retrieve' for AUR search.  Evaluates STATUS and QUERY."
   (let ((err (plist-get status :error)))
     (when err
       (error "Fetch failed")
