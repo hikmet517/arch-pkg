@@ -168,34 +168,34 @@ type: symbol => list of symbols")
 
 (define-button-type 'help-arch-package
   :supertype 'help-xref
-  'help-function 'arch-pkg-describe-package
+  'help-function #'arch-pkg-describe-package
   'help-echo (purecopy "mouse-2, RET: Describe package"))
 
 (define-button-type 'help-arch-package-installed
   :supertype 'help-xref
-  'help-function 'arch-pkg-describe-package
+  'help-function #'arch-pkg-describe-package
   'help-echo (purecopy "mouse-2, RET: Describe package")
   'face '(:inherit font-lock-type-face :underline t))
 
 (define-button-type 'help-aur-package
   :supertype 'help-xref
-  'help-function 'arch-pkg-aur-describe-package
+  'help-function #'arch-pkg-aur-describe-package
   'help-echo (purecopy "mouse-2, RET: Describe package"))
 
 (define-button-type 'help-aur-package-installed
   :supertype 'help-xref
-  'help-function 'arch-pkg-aur-describe-package
+  'help-function #'arch-pkg-aur-describe-package
   'help-echo (purecopy "mouse-2, RET: Describe package")
   'face '(:inherit font-lock-type-face :underline t))
 
 (define-button-type 'help-arch-package-files
   :supertype 'help-xref
-  'help-function 'arch-pkg-show-files
+  'help-function #'arch-pkg-show-files
   'help-echo (purecopy "mouse-2, RET: Show files"))
 
 (define-button-type 'help-arch-package-dep-tree
   :supertype 'help-xref
-  'help-function 'arch-pkg-show-dependency-tree
+  'help-function #'arch-pkg-show-dependency-tree
   'help-echo (purecopy "mouse-2, RET: Show dependency tree"))
 
 (cl-defstruct (arch-pkg-desc (:constructor arch-pkg-desc-create))
@@ -1079,10 +1079,10 @@ When called interactively, prompt for REPO."
 
 (defun arch-pkg--post-refresh ()
   "Perform refreshes after an action."
+  (arch-pkg--create-db)
   (let ((buf (get-buffer "*Arch Packages*")))
     (when (buffer-live-p buf)
       (with-current-buffer buf
-        (arch-pkg--create-db)
         (arch-pkg-list--refresh)
         (arch-pkg-list--display))))
   (let ((buf (get-buffer "*Help*")))
@@ -1093,17 +1093,21 @@ When called interactively, prompt for REPO."
 (defun arch-pkg--run-command (name command)
   "Run COMMAND with the NAME.
 When the command finishes updates the package list if needed.  Used for actions."
-  (let* ((buf "*arch-pkg-command*")
-         (process (start-process-shell-command name buf command)))
-    (set-process-filter process #'comint-output-filter)
-    (pop-to-buffer-same-window buf)
-    (with-current-buffer buf
-      (shell-command-mode))
-    (set-process-sentinel
-     process
-     (lambda (process _event)
-       (when (eq (process-status process) 'exit)
-         (arch-pkg--post-refresh))))))
+  (let ((buf "*arch-pkg-command*"))
+    (when (get-buffer buf)
+      (with-current-buffer buf
+        (let ((inhibit-read-only t))
+          (erase-buffer))))
+    (let ((process (start-process-shell-command name buf command)))
+      (set-process-filter process #'comint-output-filter)
+      (pop-to-buffer-same-window buf)
+      (with-current-buffer buf
+        (shell-command-mode))
+      (set-process-sentinel
+       process
+       (lambda (process _event)
+         (when (eq (process-status process) 'exit)
+           (arch-pkg--post-refresh)))))))
 
 (defun arch-pkg-delete-package (package)
   "Run delete command for given PACKAGE."
