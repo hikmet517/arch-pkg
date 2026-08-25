@@ -40,6 +40,7 @@
 
 (require 'button)
 (require 'cl-lib)
+(require 'comint)
 (require 'font-lock)
 (require 'help-mode)
 (require 'rx)
@@ -1088,7 +1089,9 @@ When called interactively, prompt for REPO."
   (let ((buf (get-buffer "*Help*")))
     (when (buffer-live-p buf)
       (with-current-buffer buf
-        (revert-buffer)))))
+        (when (memq (car help-xref-stack-item)
+                    '(arch-pkg-describe-package arch-pkg-aur-describe-package))
+          (revert-buffer))))))
 
 (defun arch-pkg--run-command (name command)
   "Run COMMAND with the NAME.
@@ -1098,7 +1101,9 @@ When the command finishes updates the package list if needed.  Used for actions.
       (with-current-buffer buf
         (let ((inhibit-read-only t))
           (erase-buffer))))
-    (let ((process (start-process-shell-command name buf command)))
+    (let* ((process-environment (append (comint-term-environment)
+                                        (copy-sequence process-environment)))
+           (process (start-process-shell-command name buf command)))
       (set-process-filter process #'comint-output-filter)
       (pop-to-buffer-same-window buf)
       (with-current-buffer buf
