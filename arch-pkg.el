@@ -1,4 +1,4 @@
-;;; arch-pkg.el --- Browse Archlinux packages in Emacs  -*- lexical-binding: t -*-
+;;; arch-pkg.el --- Browse Arch Linux packages in Emacs  -*- lexical-binding: t -*-
 
 ;; Copyright (C) 2022-2026 Hikmet Altıntaş
 
@@ -59,6 +59,12 @@
 (defconst arch-pkg-package-url "https://archlinux.org/packages/%s/%s/%s/")
 (defconst arch-pkg-aur-info-url "https://aur.archlinux.org/rpc/?v=5&type=info&arg=%s")
 (defconst arch-pkg-aur-search-url "https://aur.archlinux.org/rpc/?v=5&type=search&arg=%s")
+(defconst arch-pkg-list-mode-line-format
+  '((arch-pkg-list-mode-line-info
+     (:eval (symbol-value 'arch-pkg-list-mode-line-info)))))
+
+(defvar-local arch-pkg-list-mode-line-info nil
+  "Variable which stores arch-pkg-list-mode-menu mode-line format.")
 
 (defvar arch-pkg-db nil "Package database (local and sync merged).")
 (defvar arch-pkg-providedby nil
@@ -163,6 +169,12 @@ type: symbol => list of symbols")
 (defface arch-pkg-status-installed-foreign
   '((t :inherit (font-lock-string-face)))
   "Face used on the fields other than description of foreign arch packages.")
+
+(defface arch-pkg-mode-line-total nil
+  "Face for the total number of packages displayed on the mode line.")
+
+(defface arch-pkg-mode-line-installed nil
+  "Face for the number of installed packages displayed on the mode line.")
 
 
 ;;;; Data Types
@@ -599,11 +611,70 @@ Read gzipped package file, uncompress it, parse descr files into an `alist' and 
                            (message "Package '%s' not found for optionalfor field" p))))))))
              arch-pkg-db)))
 
+(defun arch-pkg-list--set-mode-line-format ()
+  "Display arch-pkg-list-mode mode-line."
+  (when-let* ((buf (get-buffer "*Arch Packages*"))
+              ((buffer-live-p buf)))
+    (with-current-buffer buf
+      (setq arch-pkg-list-mode-line-info
+            (let ((installed 0)
+                  (total (hash-table-count arch-pkg-db))
+                  (total-help "Total number of packages of all package archives")
+                  (installed-help "Total number of packages installed"))
+
+              (save-excursion
+                (goto-char (point-min))
+                (while (not (eobp))
+                  (when-let* ((id (tabulated-list-get-id))
+                              (entry (assoc id tabulated-list-entries))
+                              (status (aref (cadr entry) 3)))
+                    (when (member status '("installed" "dependency"))
+                      (setq installed (1+ installed))))
+                  (forward-line)))
+
+              (setq installed (number-to-string installed))
+              (setq total (number-to-string total))
+
+              (list
+               " ["
+               (propertize "Total: " 'help-echo total-help)
+               (propertize total
+                           'help-echo total-help
+                           'face 'arch-pkg-mode-line-total)
+               " / "
+               (propertize "Installed: " 'help-echo installed-help)
+               (propertize installed
+                           'help-echo installed-help
+                           'face 'arch-pkg-mode-line-installed)
+               "] "))))))
+
+(defun arch-pkg-list--imenu-prev-index-position-function ()
+  "Move point to previous line in arch-pkg-list buffer.
+This function is used as a value for
+`imenu-prev-index-position-function'."
+  (unless (bobp)
+    (forward-line -1)))
+
+(defun arch-pkg-list--imenu-extract-index-name-function ()
+  "Return imenu name for line at point.
+This function is used as a value for
+`imenu-extract-index-name-function'.  Point should be at the
+beginning of the line."
+  (let ((desc (arch-pkg--get-desc (tabulated-list-get-id))))
+    (format "%s (%s): %s"
+            (arch-pkg-desc-name desc)
+            (arch-pkg-desc-version desc)
+            (arch-pkg-desc-desc desc))))
+
 (define-derived-mode arch-pkg-list-mode tabulated-list-mode "Arch Package List"
-  "Major mode for browsing a list of Archlinux packages.
+  "Major mode for browsing a list of Arch Linux packages.
 
 \\{arch-pkg-list-mode-map}"
   (visual-line-mode +1)
+  (setq-local mode-line-misc-info
+              (append
+               mode-line-misc-info
+               arch-pkg-list-mode-line-format))
   (setq buffer-read-only t)
   (setq tabulated-list-format
         `[("Package" 36 t)
@@ -617,7 +688,11 @@ Read gzipped package file, uncompress it, parse descr files into an `alist' and 
   (tabulated-list-init-header)
   (let ((inhibit-message t))
     (toggle-truncate-lines +1))
-  (setq revert-buffer-function 'arch-pkg-refresh))
+  (setq revert-buffer-function 'arch-pkg-refresh)
+  (setf imenu-prev-index-position-function
+        #'arch-pkg-list--imenu-prev-index-position-function)
+  (setf imenu-extract-index-name-function
+        #'arch-pkg-list--imenu-extract-index-name-function))
 
 (defun arch-pkg-refresh (&optional _arg _noconfirm)
   "Re-read database and list packages."
@@ -684,7 +759,8 @@ column in the header line."
     (pop-to-buffer-same-window buf)
     (arch-pkg-list-mode)
     (arch-pkg-list--refresh)
-    (arch-pkg-list--display)))
+    (arch-pkg-list--display)
+    (arch-pkg-list--set-mode-line-format)))
 
 (defun arch-pkg-list--quick-help ()
   "Show short help for key bindings in `arch-pkg-list-mode'.
@@ -817,7 +893,7 @@ When called interactively, prompt for REPO."
 
 ;;;###autoload
 (defun arch-pkg-describe-package (&optional package)
-  "Display the full documentation of Archlinux package PACKAGE (`string' or `symbol')."
+  "Display the full documentation of Arch Linux package PACKAGE (`string' or `symbol')."
   (interactive)
 
   (unless package
