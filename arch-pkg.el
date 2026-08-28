@@ -648,34 +648,17 @@ Read gzipped package file, uncompress it, parse descr files into an `alist' and 
                            'face 'arch-pkg-mode-line-installed)
                "] "))))))
 
-(defun arch-pkg-list--imenu-prev-index-position-function ()
-  "Move point to previous line in arch-pkg-list buffer.
-This function is used as a value for
-`imenu-prev-index-position-function'."
-  (unless (bobp)
-    (forward-line -1)))
-
-(defun arch-pkg-list--imenu-extract-index-name-function ()
-  "Return imenu name for line at point.
-This function is used as a value for
-`imenu-extract-index-name-function'.  Point should be at the
-beginning of the line."
-  (let ((desc (arch-pkg--get-desc (tabulated-list-get-id))))
-    (format "%s (%s): %s"
-            (arch-pkg-desc-name desc)
-            (arch-pkg-desc-version desc)
-            (arch-pkg-desc-desc desc))))
-
 (define-derived-mode arch-pkg-list-mode tabulated-list-mode "Arch Package List"
   "Major mode for browsing a list of Arch Linux packages.
 
 \\{arch-pkg-list-mode-map}"
-  (visual-line-mode +1)
+  (let ((inhibit-message t))
+    (visual-line-mode +1)
+    (toggle-truncate-lines +1))
   (setq-local mode-line-misc-info
               (append
                mode-line-misc-info
                arch-pkg-list-mode-line-format))
-  (setq buffer-read-only t)
   (setq tabulated-list-format
         `[("Package" 36 t)
           ("Version" 15 t)
@@ -685,14 +668,9 @@ beginning of the line."
           ("Size" 11 arch-pkg--size-predicate)
           ("Description" 0 t)])
   (setq tabulated-list-padding 2)
+  (add-hook 'tabulated-list-revert-hook #'arch-pkg--create-db nil t)
   (tabulated-list-init-header)
-  (let ((inhibit-message t))
-    (toggle-truncate-lines +1))
-  (setq revert-buffer-function 'arch-pkg-refresh)
-  (setf imenu-prev-index-position-function
-        #'arch-pkg-list--imenu-prev-index-position-function)
-  (setf imenu-extract-index-name-function
-        #'arch-pkg-list--imenu-extract-index-name-function))
+  (setq revert-buffer-function 'arch-pkg-refresh))
 
 (defun arch-pkg-refresh (&optional _arg _noconfirm)
   "Re-read database and list packages."
@@ -755,12 +733,14 @@ column in the header line."
     (arch-pkg--create-db))
 
   ;; create buffer and display
-  (let ((buf (get-buffer-create "*Arch Packages*")))
-    (pop-to-buffer-same-window buf)
-    (arch-pkg-list-mode)
-    (arch-pkg-list--refresh)
-    (arch-pkg-list--display)
-    (arch-pkg-list--set-mode-line-format)))
+  (let* ((buf (get-buffer-create "*Arch Packages*")))
+    (with-current-buffer buf
+      (setq buffer-file-coding-system 'utf-8)
+      (arch-pkg-list-mode)
+      (arch-pkg-list--refresh)
+      (arch-pkg-list--display)
+      (arch-pkg-list--set-mode-line-format)
+      (pop-to-buffer-same-window buf))))
 
 (defun arch-pkg-list--quick-help ()
   "Show short help for key bindings in `arch-pkg-list-mode'.
